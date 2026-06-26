@@ -7,6 +7,8 @@ and returns responses.
 
 from typing import Any
 
+from athena.memory.manager import MemoryManager
+
 
 class AthenaBrain:
     """
@@ -17,10 +19,14 @@ class AthenaBrain:
         - Orchestrate reasoning flow
         - Delegate work to LLM providers
         - Return structured responses
+        - Manage memory through MemoryManager
 
     For now, the implementation is minimal and returns a status string
     for testing purposes. Future versions will integrate actual reasoning.
     """
+
+    def __init__(self) -> None:
+        self.memory_manager = MemoryManager()
 
     async def process(self, message: str) -> str:
         """
