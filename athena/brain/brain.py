@@ -5,9 +5,9 @@ Core orchestration component that receives requests, reasons, delegates to provi
 and returns responses.
 """
 
-from typing import Any
-
 from athena.memory.manager import MemoryManager
+from athena.thought.models import Thought
+from athena.thought.pipeline import ThoughtPipeline
 
 
 class AthenaBrain:
@@ -16,34 +16,35 @@ class AthenaBrain:
 
     Responsibilities:
         - Receive incoming requests
-        - Orchestrate reasoning flow
-        - Delegate work to LLM providers
-        - Return structured responses
+        - Create Thought objects
+        - Pass Thoughts through ThoughtPipeline
+        - Return thought.response
         - Manage memory through MemoryManager
 
-    For now, the implementation is minimal and returns a status string
-    for testing purposes. Future versions will integrate actual reasoning.
+    Methods:
+        process(message): Process a message and return thought.response.
     """
 
     def __init__(self) -> None:
         self.memory_manager = MemoryManager()
+        self.pipeline = ThoughtPipeline()
 
     async def process(self, message: str) -> str:
         """
         Process a message through the Athena brain pipeline.
 
+        Creates a Thought object, passes it through ThoughtPipeline,
+        and returns the response from the thought.
+
         Args:
             message: The input message to process.
 
         Returns:
-            A status string indicating the brain is online.
-
-        TODO:
-            - Integrate reasoning engine
-            - Delegate to providers
-            - Return full response structure
+            The response string from the thought.
         """
-        return "Athena Brain Online"
+        thought = Thought(user_input=message)
+        await self.pipeline.process(thought)
+        return thought.get_response()
 
 
 # Singleton instance for convenience
