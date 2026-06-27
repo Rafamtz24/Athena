@@ -1,4 +1,4 @@
-"""
+﻿"""
 Athena Thought Pipeline
 
 Defines the ThoughtPipeline class that orchestrates the processing of a Thought object
@@ -90,6 +90,8 @@ class ThoughtPipeline:
         self._reason(thought)
         self._plan(thought)
         self._prepare_tools(thought)
+        engine = CognitiveEngine()
+        thought = engine.process(thought)
         self._build_response(thought)
         self._reflect(thought)
         self._finalize(thought)
