@@ -5,6 +5,7 @@ for future cognitive processing strategies and contexts.
 """
 
 from athena.logging.logger import logger
+from athena.prompt.builder import PromptBuilder
 from athena.providers.lmstudio import LMStudioProvider
 
 
@@ -28,7 +29,9 @@ class CognitiveEngine:
         thought.metadata["cognitive_engine"] = "processed"
         if thought.get_response() is None:
             provider = LMStudioProvider()
-            response = provider.generate(thought.user_input)
+            builder = PromptBuilder()
+            prompt = builder.build(thought)
+            response = provider.generate(prompt)
             thought.set_response(response)
         result = thought
         logger.info("Cognitive Engine Completed")
