@@ -2,12 +2,18 @@
 Athena Thought Pipeline
 
 Defines the ThoughtPipeline class that orchestrates the processing of a Thought object
-through multiple stages. Each stage is implemented as a private method with placeholder
-implementations for future expansion.
+through multiple stages. Each stage publishes an event on the EventBus for decoupled
+communication with other subsystems.
+
+EventBus integration:
+    - Each pipeline stage publishes a corresponding event
+    - Events allow other modules to observe thought lifecycle without tight coupling
 """
 
-from typing import Any
+from typing import Any, Optional
 
+from athena.events.bus import get_event_bus
+from athena.events.models import Event
 from athena.thought.models import Thought
 
 
@@ -19,18 +25,28 @@ class ThoughtPipeline:
         create(): Factory method to create and initialize a new Thought.
         process(): Run a Thought through all processing stages.
 
-    Each processing stage is implemented as a private method. Currently,
-    all stages contain placeholder implementations for future expansion.
+    Each processing stage is implemented as a private method with placeholder
+    implementations for future expansion. Events are published at each stage.
 
     Pipeline Stages:
-        _initialize(): Initialize the thought with basic metadata.
-        _load_memory(): Load relevant memories into the thought.
-        _reason(): Perform reasoning on the user input.
-        _plan(): Generate an execution plan.
-        _prepare_tools(): Prepare tool requests if needed.
-        _build_response(): Construct the final response.
-        _reflect(): Self-evaluate the processing outcome.
-        _finalize(): Finalize and return the thought.
+        _initialize()      -> publishes ThoughtCreated event
+        _load_memory()     -> publishes MemoryLoaded event
+        _reason()          -> publishes ReasoningStarted event
+        _plan()            -> publishes PlanningCompleted event (partial)
+        _prepare_tools()   -> publishes ToolsPrepared event
+        _build_response()  -> publishes ResponseGenerated event
+        _reflect()         -> publishes ReflectionStarted event
+        _finalize()        -> publishes ThoughtCompleted event
+
+    Events published:
+        - ThoughtCreated
+        - MemoryLoaded
+        - ReasoningStarted
+        - PlanningStarted
+        - ToolsPrepared
+        - ResponseGenerated
+        - ReflectionStarted
+        - ThoughtCompleted
     """
 
     @staticmethod
@@ -45,6 +61,14 @@ class ThoughtPipeline:
             Thought: A newly initialized Thought object.
         """
         thought = Thought(user_input=user_input)
+        bus = get_event_bus()
+        event = Event(
+            type="ThoughtCreated",
+            source="thought_pipeline",
+            payload={"user_input": user_input},
+            metadata={"stage": "created"},
+        )
+        bus.publish(event)
         return thought
 
     async def process(self, thought: Thought) -> Any:
@@ -52,6 +76,7 @@ class ThoughtPipeline:
         Run a Thought through all processing stages sequentially.
 
         Each stage is called in order and may modify the Thought object.
+        Events are published at each stage for observability.
         The final response is extracted from the thought after completion.
 
         Args:
@@ -74,33 +99,97 @@ class ThoughtPipeline:
     def _initialize(self, thought: Thought) -> None:
         """Stage 1: Initialize the thought with basic metadata."""
         thought.metadata["stage"] = "initialized"
+        bus = get_event_bus()
+        event = Event(
+            type="ThoughtCreated",
+            source="thought_pipeline",
+            payload={"user_input": thought.user_input},
+            metadata={"stage": "initialized"},
+        )
+        bus.publish(event)
 
     def _load_memory(self, thought: Thought) -> None:
         """Stage 2: Load relevant memories into the thought."""
         thought.metadata["stage"] = "memory_loaded"
+        bus = get_event_bus()
+        event = Event(
+            type="MemoryLoaded",
+            source="thought_pipeline",
+            payload={"user_input": thought.user_input},
+            metadata={"stage": "memory_loaded"},
+        )
+        bus.publish(event)
 
     def _reason(self, thought: Thought) -> None:
         """Stage 3: Perform reasoning on the user input."""
         thought.metadata["stage"] = "reasoned"
+        bus = get_event_bus()
+        event = Event(
+            type="ReasoningStarted",
+            source="thought_pipeline",
+            payload={"user_input": thought.user_input},
+            metadata={"stage": "reasoning"},
+        )
+        bus.publish(event)
 
     def _plan(self, thought: Thought) -> None:
         """Stage 4: Generate an execution plan."""
         thought.metadata["stage"] = "planned"
+        bus = get_event_bus()
+        event = Event(
+            type="PlanningStarted",
+            source="thought_pipeline",
+            payload={"user_input": thought.user_input},
+            metadata={"stage": "planning"},
+        )
+        bus.publish(event)
 
     def _prepare_tools(self, thought: Thought) -> None:
         """Stage 5: Prepare tool requests if needed."""
         thought.metadata["stage"] = "tools_prepared"
+        bus = get_event_bus()
+        event = Event(
+            type="ToolsPrepared",
+            source="thought_pipeline",
+            payload={"user_input": thought.user_input},
+            metadata={"stage": "tools_prepared"},
+        )
+        bus.publish(event)
 
     def _build_response(self, thought: Thought) -> None:
         """Stage 6: Construct the final response."""
         thought.set_response("Response placeholder")
         thought.metadata["stage"] = "response_built"
+        bus = get_event_bus()
+        event = Event(
+            type="ResponseGenerated",
+            source="thought_pipeline",
+            payload={"user_input": thought.user_input, "response": thought.get_response()},
+            metadata={"stage": "response_generated"},
+        )
+        bus.publish(event)
 
     def _reflect(self, thought: Thought) -> None:
         """Stage 7: Self-evaluate the processing outcome."""
         thought.reflection = {"status": "completed"}
         thought.metadata["stage"] = "reflected"
+        bus = get_event_bus()
+        event = Event(
+            type="ReflectionStarted",
+            source="thought_pipeline",
+            payload={"user_input": thought.user_input},
+            metadata={"stage": "reflection"},
+        )
+        bus.publish(event)
 
     def _finalize(self, thought: Thought) -> None:
         """Stage 8: Finalize the thought and prepare for return."""
         thought.metadata["stage"] = "finalized"
+        bus = get_event_bus()
+        event = Event(
+            type="ThoughtCompleted",
+            source="thought_pipeline",
+            payload={"user_input": thought.user_input, "response": thought.get_response()},
+            metadata={"stage": "completed"},
+        )
+        bus.publish(event)
