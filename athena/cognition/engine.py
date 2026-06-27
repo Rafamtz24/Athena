@@ -4,6 +4,8 @@ Provides the CognitiveEngine class, which serves as the entry point
 for future cognitive processing strategies and contexts.
 """
 
+from athena.logging.logger import logger
+
 
 class CognitiveEngine:
     """Minimal cognitive engine skeleton.
@@ -19,6 +21,12 @@ class CognitiveEngine:
             thought: A Thought instance to be processed.
 
         Returns:
-            The Thought object unchanged.
+            The Thought object with cognitive_engine metadata set.
         """
-        return thought
+        logger.info("Cognitive Engine Started")
+        thought.metadata["cognitive_engine"] = "processed"
+        if thought.get_response() is None:
+            thought.set_response("Cognitive Engine Placeholder Response")
+        result = thought
+        logger.info("Cognitive Engine Completed")
+        return result
