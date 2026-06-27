@@ -4,6 +4,8 @@ LM Studio Provider
 Provides a placeholder implementation for LM Studio integration.
 """
 
+import requests
+
 
 class LMStudioProvider:
     """
@@ -25,6 +27,22 @@ class LMStudioProvider:
             prompt: The input prompt string.
 
         Returns:
-            A placeholder string for now. HTTP requests are not yet implemented.
+            The LLM response text or error message.
         """
-        return "LM Studio Placeholder"
+        try:
+            url = f"{self.base_url}/v1/chat/completions"
+            payload = {
+                "model": "qwen2.5-3b-instruct",
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": prompt
+                    }
+                ],
+                "temperature": 0.7,
+                "stream": False
+            }
+            response = requests.post(url, json=payload)
+            return response.json()["choices"][0]["message"]["content"]
+        except Exception as e:
+            return f"LM Studio Error: {e}"

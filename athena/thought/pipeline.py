@@ -15,6 +15,7 @@ from typing import Any, Optional
 from athena.events.bus import get_event_bus
 from athena.events.models import Event
 from athena.thought.models import Thought
+from athena.cognition.engine import CognitiveEngine
 
 
 class ThoughtPipeline:
@@ -160,7 +161,6 @@ class ThoughtPipeline:
 
     def _build_response(self, thought: Thought) -> None:
         """Stage 6: Construct the final response."""
-        thought.set_response("Response placeholder")
         thought.metadata["stage"] = "response_built"
         bus = get_event_bus()
         event = Event(
