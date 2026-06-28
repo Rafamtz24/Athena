@@ -6,7 +6,6 @@ for future cognitive processing strategies and contexts.
 
 from athena.logging.logger import logger
 from athena.prompt.builder import PromptBuilder
-from athena.providers.lmstudio import LMStudioProvider
 
 
 class CognitiveEngine:
@@ -15,6 +14,9 @@ class CognitiveEngine:
     Currently only provides a pass-through process method.
     Future versions will add reasoning, planning, reflection, etc.
     """
+
+    def __init__(self, provider):
+        self.provider = provider
 
     def process(self, thought):
         """Process the given Thought object.
@@ -28,13 +30,12 @@ class CognitiveEngine:
         logger.info("Cognitive Engine Started")
         thought.metadata["cognitive_engine"] = "processed"
         if thought.get_response() is None:
-            provider = LMStudioProvider()
             builder = PromptBuilder()
             prompt = builder.build(thought)
             thought.trace["prompt"] = {
                 "text": prompt
             }
-            response = provider.generate(prompt)
+            response = self.provider.generate(prompt)
             thought.set_response(response)
         result = thought
         logger.info("Cognitive Engine Completed")

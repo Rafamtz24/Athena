@@ -50,9 +50,10 @@ class ThoughtPipeline:
         - ThoughtCompleted
     """
 
-    def __init__(self, memory_manager=None, knowledge_manager=None):
+    def __init__(self, memory_manager=None, knowledge_manager=None, provider=None):
         self.memory_manager = memory_manager
         self.knowledge_manager = knowledge_manager
+        self.provider = provider
 
     @staticmethod
     def create(user_input: str) -> Thought:
@@ -96,7 +97,7 @@ class ThoughtPipeline:
         self._reason(thought)
         self._plan(thought)
         self._prepare_tools(thought)
-        engine = CognitiveEngine()
+        engine = CognitiveEngine(self.provider)
         thought = engine.process(thought)
         self._build_response(thought)
         self._reflect(thought)

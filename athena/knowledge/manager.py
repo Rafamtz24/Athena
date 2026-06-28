@@ -8,8 +8,9 @@ from .models import KnowledgeEntry, KnowledgeQuery, KnowledgeResult, KnowledgeCa
 class KnowledgeManager:
     """Placeholder for knowledge management operations."""
 
-    def __init__(self) -> None:
+    def __init__(self, provider=None) -> None:
         """Initialize the knowledge manager with an empty candidate list and empty knowledge storage."""
+        self.provider = provider
         self.candidates = []
         self.knowledge = []
 
@@ -40,6 +41,10 @@ class KnowledgeManager:
     def get_candidates(self) -> List[KnowledgeCandidate]:
         """Get all knowledge candidates. Returns the candidate list."""
         return self.candidates
+
+    def _build_extraction_prompt(self, conversation: str) -> str:
+        """Build extraction prompt for knowledge extraction."""
+        return f"You extract durable user knowledge.\n\nExtract only long-term facts worth remembering.\n\nConversation:\n{conversation}"
 
     def retrieve(self, query: str):
         """Retrieve knowledge based on query.

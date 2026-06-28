@@ -29,11 +29,17 @@ class AthenaBrain:
     """
 
     def __init__(self) -> None:
+        from athena.providers.lmstudio import LMStudioProvider
+
         self.debug_manager = DebugManager()
-        self.knowledge_manager = KnowledgeManager()
+        self.provider = LMStudioProvider()
+        self.knowledge_manager = KnowledgeManager(self.provider)
         self.memory_manager = MemoryManager()
-        self.knowledge_manager = KnowledgeManager()
-        self.pipeline = ThoughtPipeline(self.memory_manager, self.knowledge_manager)
+        self.pipeline = ThoughtPipeline(
+            self.memory_manager,
+            self.knowledge_manager,
+            self.provider,
+        )
         self.history: list[str] = []  # Conversation history stored by the brain
 
     async def process(self, message: str) -> str:
@@ -70,6 +76,3 @@ class AthenaBrain:
 
         return response
 
-
-# Singleton instance for convenience
-brain = AthenaBrain()
