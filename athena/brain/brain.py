@@ -27,7 +27,7 @@ class AthenaBrain:
 
     def __init__(self) -> None:
         self.memory_manager = MemoryManager()
-        self.pipeline = ThoughtPipeline()
+        self.pipeline = ThoughtPipeline(self.memory_manager)
         self.history: list[str] = []  # Conversation history stored by the brain
 
     async def process(self, message: str) -> str:
