@@ -7,18 +7,54 @@ class PromptBuilder:
             "",
             "Always answer truthfully.",
             "",
+            "====================",
+            "",
+            "Conversation",
+            "",
+            "====================",
         ]
 
         if not thought.history:
-            lines.append("Conversation:")
             lines.append("(None)")
         else:
-                    lines.append("Conversation:")
-                    for item in thought.history[-10:]:
-                        lines.append(item)
+            for item in thought.history[-10:]:
+                lines.append(item)
 
-        lines.append("")
-        lines.append("User:")
-        lines.append(thought.user_input)
+        lines.extend([
+            "",
+            "====================",
+            "",
+            "Memory",
+            "",
+            "====================",
+            "",
+            "(None)",
+            "",
+            "====================",
+            "",
+            "Knowledge",
+            "",
+            "====================",
+            "",
+            "(None)",
+            "",
+            "====================",
+            "",
+            "Plan",
+            "",
+            "====================",
+            "",
+            "(None)",
+            "",
+            "====================",
+            "",
+            "User",
+            "",
+            "====================",
+            "",
+            thought.user_input,
+            "",
+            "====================",
+        ])
 
         return "\n".join(lines)
