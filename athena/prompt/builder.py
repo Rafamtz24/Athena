@@ -13,9 +13,9 @@ class PromptBuilder:
             lines.append("Conversation:")
             lines.append("(None)")
         else:
-            lines.append("Conversation:")
-            for item in thought.history:
-                lines.append(item)
+                    lines.append("Conversation:")
+                    for item in thought.history[-10:]:
+                        lines.append(item)
 
         lines.append("")
         lines.append("User:")
