@@ -50,8 +50,9 @@ class ThoughtPipeline:
         - ThoughtCompleted
     """
 
-    def __init__(self, memory_manager=None):
+    def __init__(self, memory_manager=None, knowledge_manager=None):
         self.memory_manager = memory_manager
+        self.knowledge_manager = knowledge_manager
 
     @staticmethod
     def create(user_input: str) -> Thought:
@@ -91,6 +92,7 @@ class ThoughtPipeline:
         """
         self._initialize(thought)
         self._load_memory(thought)
+        self._load_knowledge(thought)
         self._reason(thought)
         self._plan(thought)
         self._prepare_tools(thought)
@@ -135,8 +137,34 @@ class ThoughtPipeline:
         )
         bus.publish(event)
 
+    def _load_knowledge(self, thought: Thought) -> None:
+        """Stage 3: Load knowledge via KnowledgeManager retrieval."""
+        if self.knowledge_manager is not None:
+            knowledge = self.knowledge_manager.retrieve(thought.user_input)
+            thought.knowledge = knowledge
+            thought.trace["knowledge"] = {
+                "query": thought.user_input,
+                "value": knowledge
+            }
+        else:
+            thought.knowledge = None
+            thought.trace["knowledge"] = {
+                "query": None,
+                "value": None
+            }
+        
+        thought.metadata["stage"] = "knowledge_loaded"
+        bus = get_event_bus()
+        event = Event(
+            type="KnowledgeLoaded",
+            source="thought_pipeline",
+            payload={"user_input": thought.user_input},
+            metadata={"stage": "knowledge_loaded"},
+        )
+        bus.publish(event)
+
     def _reason(self, thought: Thought) -> None:
-        """Stage 3: Perform reasoning on the user input."""
+        """Stage 4: Perform reasoning on the user input."""
         thought.metadata["stage"] = "reasoned"
         bus = get_event_bus()
         event = Event(

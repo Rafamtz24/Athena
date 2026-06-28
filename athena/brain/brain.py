@@ -6,6 +6,7 @@ and returns responses.
 """
 
 from athena.debug.manager import DebugManager
+from athena.knowledge.manager import KnowledgeManager
 from athena.memory.manager import MemoryManager
 from athena.thought.models import Thought
 from athena.thought.pipeline import ThoughtPipeline
@@ -21,6 +22,7 @@ class AthenaBrain:
         - Pass Thoughts through ThoughtPipeline
         - Return thought.response
         - Manage memory through MemoryManager
+        - Manage knowledge through KnowledgeManager
 
     Methods:
         process(message): Process a message and return thought.response.
@@ -28,8 +30,10 @@ class AthenaBrain:
 
     def __init__(self) -> None:
         self.debug_manager = DebugManager()
+        self.knowledge_manager = KnowledgeManager()
         self.memory_manager = MemoryManager()
-        self.pipeline = ThoughtPipeline(self.memory_manager)
+        self.knowledge_manager = KnowledgeManager()
+        self.pipeline = ThoughtPipeline(self.memory_manager, self.knowledge_manager)
         self.history: list[str] = []  # Conversation history stored by the brain
 
     async def process(self, message: str) -> str:

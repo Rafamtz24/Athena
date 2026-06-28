@@ -2,11 +2,16 @@
 
 from typing import List, Dict, Any
 
-from .models import KnowledgeEntry, KnowledgeQuery, KnowledgeResult
+from .models import KnowledgeEntry, KnowledgeQuery, KnowledgeResult, KnowledgeCandidate
 
 
 class KnowledgeManager:
     """Placeholder for knowledge management operations."""
+
+    def __init__(self) -> None:
+        """Initialize the knowledge manager with an empty candidate list and empty knowledge storage."""
+        self.candidates = []
+        self.knowledge = []
 
     def add_entry(self, entry: KnowledgeEntry) -> str:
         """Add a knowledge entry. Returns empty ID."""
@@ -27,3 +32,33 @@ class KnowledgeManager:
     def update_entry(self, entry_id: str, data: Dict[str, Any]) -> bool:
         """Update a knowledge entry. Returns empty ID."""
         return ""
+
+    def add_candidate(self, candidate: KnowledgeCandidate) -> None:
+        """Add a knowledge candidate to the collection."""
+        self.candidates.append(candidate)
+
+    def get_candidates(self) -> List[KnowledgeCandidate]:
+        """Get all knowledge candidates. Returns the candidate list."""
+        return self.candidates
+
+    def retrieve(self, query: str):
+        """Retrieve knowledge based on query.
+        
+        If self.knowledge is empty, returns None.
+        Otherwise, returns all knowledge entries joined by newlines.
+        """
+        if not self.knowledge:
+            return None
+        return "\n".join(self.knowledge)
+
+    def extract_candidates(self, conversation: str) -> List[Any]:
+        """Extract knowledge candidates from a conversation. Returns empty list for now."""
+        return []
+
+    def add(self, knowledge) -> None:
+        """Add a knowledge entry to the storage."""
+        self.knowledge.append(knowledge)
+
+    def all(self):
+        """Return all stored knowledge entries."""
+        return self.knowledge

@@ -26,3 +26,12 @@ class KnowledgeResult:
     """Placeholder for a knowledge result."""
 
     entries: List[KnowledgeEntry] = field(default_factory=list)
+
+
+@dataclass
+class KnowledgeCandidate:
+    """Placeholder for a knowledge candidate under consideration."""
+
+    statement: str = ""
+    confidence: float = 0.0
+    category: str = ""
