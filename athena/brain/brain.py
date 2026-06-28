@@ -44,6 +44,7 @@ class AthenaBrain:
             The response string from the thought.
         """
         thought = Thought(user_input=message)
+        
         # Copy current conversation history into the thought before processing
         thought.history = list(self.history)
 
