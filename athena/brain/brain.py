@@ -28,6 +28,7 @@ class AthenaBrain:
     def __init__(self) -> None:
         self.memory_manager = MemoryManager()
         self.pipeline = ThoughtPipeline()
+        self.history: list[str] = []  # Conversation history stored by the brain
 
     async def process(self, message: str) -> str:
         """
@@ -43,8 +44,17 @@ class AthenaBrain:
             The response string from the thought.
         """
         thought = Thought(user_input=message)
+        # Copy current conversation history into the thought before processing
+        thought.history = list(self.history)
+
         await self.pipeline.process(thought)
-        return thought.get_response()
+        response = thought.get_response()
+
+        # Append conversation turn to history after obtaining response
+        self.history.append(f"User: {message}")
+        self.history.append(f"Assistant: {response}")
+
+        return response
 
 
 # Singleton instance for convenience
