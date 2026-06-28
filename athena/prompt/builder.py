@@ -28,8 +28,15 @@ class PromptBuilder:
             "",
             "====================",
             "",
-            "(None)",
-            "",
+        ])
+
+        if not thought.memories:
+            lines.append("(None)")
+        else:
+            for memory in thought.memories:
+                lines.append(memory)
+
+        lines.extend([
             "====================",
             "",
             "Knowledge",
