@@ -54,6 +54,10 @@ class AthenaBrain:
         self.history.append(f"User: {message}")
         self.history.append(f"Assistant: {response}")
 
+        # Store in episodic memory
+        content = f"User:\n{message}\n\nAssistant:\n{response}"
+        self.memory_manager.remember(content)
+
         return response
 
 
