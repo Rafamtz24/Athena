@@ -115,25 +115,15 @@ class ThoughtPipeline:
         bus.publish(event)
 
     def _load_memory(self, thought: Thought) -> None:
-        """Stage 2: Load relevant memories into the thought."""
-        thought.memories = []
-        
+        """Stage 2: Load relevant episodic memories into the thought."""
         if self.memory_manager is not None:
             try:
                 episodic_memories = self.memory_manager.recall()
-                semantic_memories = self.memory_manager.query_semantic()
-                
-                memories = []
                 if episodic_memories:
-                    memories.extend(episodic_memories)
-                if semantic_memories:
-                    memories.append(semantic_memories)
-                
-                thought.memories = memories if memories else []
+                    for mem in episodic_memories:
+                        thought.memories.append(mem.content)
             except Exception:
-                thought.memories = []
-        else:
-            thought.memories = []
+                pass
         
         thought.metadata["stage"] = "memory_loaded"
         bus = get_event_bus()
