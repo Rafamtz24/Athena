@@ -43,8 +43,14 @@ class PromptBuilder:
             "",
             "====================",
             "",
-            "(None)",
-            "",
+        ])
+
+        if thought.knowledge is None:
+            lines.append("(None)")
+        else:
+            lines.append(thought.knowledge)
+
+        lines.extend([
             "====================",
             "",
             "Plan",
