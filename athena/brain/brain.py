@@ -5,6 +5,7 @@ Core orchestration component that receives requests, reasons, delegates to provi
 and returns responses.
 """
 
+from athena.debug.manager import DebugManager
 from athena.memory.manager import MemoryManager
 from athena.thought.models import Thought
 from athena.thought.pipeline import ThoughtPipeline
@@ -26,6 +27,7 @@ class AthenaBrain:
     """
 
     def __init__(self) -> None:
+        self.debug_manager = DebugManager()
         self.memory_manager = MemoryManager()
         self.pipeline = ThoughtPipeline(self.memory_manager)
         self.history: list[str] = []  # Conversation history stored by the brain
@@ -50,6 +52,9 @@ class AthenaBrain:
 
         await self.pipeline.process(thought)
         response = thought.get_response()
+
+        # Store the completed thought in debug manager
+        self.debug_manager.set_last_thought(thought)
 
         # Append conversation turn to history after obtaining response
         self.history.append(f"User: {message}")

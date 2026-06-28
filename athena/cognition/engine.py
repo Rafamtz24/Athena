@@ -31,6 +31,9 @@ class CognitiveEngine:
             provider = LMStudioProvider()
             builder = PromptBuilder()
             prompt = builder.build(thought)
+            thought.trace["prompt"] = {
+                "text": prompt
+            }
             response = provider.generate(prompt)
             thought.set_response(response)
         result = thought

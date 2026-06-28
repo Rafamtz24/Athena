@@ -51,6 +51,7 @@ class Thought:
     response: Any = None
     reflection: Any = None
     metadata: dict = field(default_factory=dict)
+    trace: dict = field(default_factory=dict)
     history: list = field(default_factory=list)
 
     def set_user_input(self, user_input: str):
