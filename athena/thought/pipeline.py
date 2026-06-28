@@ -50,6 +50,9 @@ class ThoughtPipeline:
         - ThoughtCompleted
     """
 
+    def __init__(self, memory_manager=None):
+        self.memory_manager = memory_manager
+
     @staticmethod
     def create(user_input: str) -> Thought:
         """
@@ -113,6 +116,25 @@ class ThoughtPipeline:
 
     def _load_memory(self, thought: Thought) -> None:
         """Stage 2: Load relevant memories into the thought."""
+        thought.memories = []
+        
+        if self.memory_manager is not None:
+            try:
+                episodic_memories = self.memory_manager.recall()
+                semantic_memories = self.memory_manager.query_semantic()
+                
+                memories = []
+                if episodic_memories:
+                    memories.extend(episodic_memories)
+                if semantic_memories:
+                    memories.append(semantic_memories)
+                
+                thought.memories = memories if memories else []
+            except Exception:
+                thought.memories = []
+        else:
+            thought.memories = []
+        
         thought.metadata["stage"] = "memory_loaded"
         bus = get_event_bus()
         event = Event(
