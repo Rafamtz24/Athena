@@ -15,6 +15,10 @@ from athena.config.settings import settings
 from athena.logging.logger import logger
 
 
+# Shared AthenaBrain instance for all endpoints
+brain = AthenaBrain()
+
+
 app = FastAPI(
     title="Athena",
     version="0.2.0",
@@ -61,6 +65,32 @@ async def process(message: str):
         dict: Processing result from the Athena Brain.
     """
     logger.info("Process endpoint accessed with message: %s", message)
-    brain = AthenaBrain()
     result = await brain.process(message)
     return {"result": result}
+
+
+@app.get("/debug/last_thought")
+async def debug_last_thought():
+    """
+    Debug endpoint - returns the last processed thought as JSON.
+
+    Returns:
+        dict: Thought data or status "empty" if no thought exists yet.
+    """
+    logger.info("Debug last_thought endpoint accessed")
+    thought = brain.debug_manager.get_last_thought()
+
+    if thought is None:
+        return {"status": "empty"}
+
+    return {
+        "id": thought.id,
+        "user_input": thought.user_input,
+        "history": thought.history,
+        "memories": thought.memories,
+        "knowledge": thought.knowledge,
+        "plan": thought.plan,
+        "response": thought.get_response(),
+        "trace": thought.trace,
+        "metadata": thought.metadata,
+    }
