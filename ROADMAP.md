@@ -4,151 +4,168 @@
 
 This roadmap describes the long-term evolution of Athena.
 
-It is not a strict schedule.
+Athena is developed in two phases:
 
-It is a guide for architectural growth.
+1. **Core Development** — Build a stable architectural foundation.
+2. **Capability Development** — Incrementally improve Athena's intelligence by adding new capabilities.
 
-Capabilities may move between versions as the project evolves.
+This document is a guide rather than a strict schedule. Capabilities may change order as the project evolves.
 
 ---
 
 # Current Status
 
-Completed
+## Athena Core v1
 
-✓ Brain
+Status: **Architecturally Complete**
 
-✓ Memory Foundation
+### Completed
 
-✓ Thought Pipeline
+* ✓ Brain
+* ✓ Memory Foundation
+* ✓ Thought Pipeline
+* ✓ Event System
+* ✓ Modular Routing Architecture
 
-✓ Event System
+The Core provides the stable foundation upon which all future capabilities will be built.
 
 ---
 
-# Epoch I — Foundation (Completed)
+# Capability Development
 
-Goal:
+## Capability 1 — Semantic Retrieval
 
-Create the architectural foundation of Athena.
+### Goal
 
-Milestones:
+Retrieve only the memories relevant to the current thought.
 
-- Brain
-- Memory
-- Thought
-- Events
+### Planned Improvements
+
+* Relevant retrieval
+* Query scoring
+* Memory ranking
+* Future support for embeddings (when justified)
 
 Status:
 
-Completed
+In Progress
 
 ---
 
-# Epoch II — Cognition
+## Capability 2 — Memory Reconciliation
 
-Goal:
+### Goal
 
-Teach Athena how to think.
+Maintain a consistent knowledge base by resolving duplicate and conflicting memories.
 
-Planned capabilities:
+### Planned Improvements
 
-- Cognitive Engine
-- Provider Runtime
-- LM Studio Provider
-- Prompt Builder
-- First End-to-End Conversation
-
----
-
-# Epoch III — Action
-
-Goal:
-
-Allow Athena to interact with the outside world.
-
-Planned capabilities:
-
-- Tool Framework
-- Filesystem Tools
-- Terminal Tools
-- Browser Tools
-- Desktop Automation
+* Duplicate detection
+* Contradiction detection
+* Memory merging
+* Confidence management
 
 ---
 
-# Epoch IV — Knowledge
+## Capability 3 — Cognitive Planner
 
-Goal:
+### Goal
 
-Enable long-term knowledge.
+Determine which cognitive modules should participate in solving each request.
 
-Planned capabilities:
+### Planned Improvements
 
-- Embeddings
-- Vector Database
-- Document Indexing
-- Retrieval
-- Long-Term Memory
-
----
-
-# Epoch V — Personal Assistant
-
-Goal:
-
-Become a true personal assistant.
-
-Planned capabilities:
-
-- Voice
-- Calendar
-- Email
-- Budget Management
-- University Assistant
-- Daily Planning
+* Request triage
+* Module activation
+* Context planning
+* Dynamic reasoning pipelines
 
 ---
 
-# Epoch VI — Autonomy
+## Capability 4 — Tool Orchestration
 
-Goal:
+### Goal
+
+Allow Athena to safely interact with external systems.
+
+### Planned Improvements
+
+* Tool Framework
+* Tool Registry
+* Permission System
+* Filesystem Tools
+* Terminal Tools
+* Browser Tools
+* Python Runtime
+* Desktop Automation
+
+---
+
+## Capability 5 — Personal Assistant
+
+### Goal
+
+Provide practical assistance in everyday tasks.
+
+### Planned Improvements
+
+* User Profile
+* Preferences
+* Scheduling
+* Notifications
+* Calendar Integration
+* Email Integration
+* Daily Planning
+* Budget Management
+
+---
+
+## Capability 6 — Autonomy
+
+### Goal
 
 Operate independently when appropriate.
 
-Planned capabilities:
+### Planned Improvements
 
-- Reflection
-- Background Tasks
-- Scheduling
-- Multi-Agent Collaboration
-- Continuous Learning
-
----
-
-# Version Roadmap
-
-| Version | Milestone |
-|---------|-----------|
-| 0.1     | Brain |
-| 0.2     | Memory |
-| 0.3     | Thought |
-| 0.4     | Events |
-| 0.5     | Cognitive Engine |
-| 0.6     | Provider Runtime |
-| 0.7     | First Conversation |
-| 0.8     | Tools |
-| 0.9     | Knowledge |
-| 1.0     | Athena Personal Assistant |
+* Reflection
+* Planning
+* Goal Management
+* Background Tasks
+* Continuous Learning
+* Self-Evaluation
+* Multi-Agent Collaboration
 
 ---
 
-# Guiding Philosophy
+## Capability 7 — Intelligence
 
-Athena grows by adding capabilities.
+### Goal
 
-Foundations should rarely need redesign.
+Continuously improve Athena's ability to learn and reason.
 
-Every new subsystem should fit naturally into the existing architecture.
+### Planned Improvements
+
+* Skill acquisition
+* Pattern abstraction
+* Knowledge synthesis
+* Memory optimization
+* Generalization
+* Self-optimization
+
+---
+
+# Development Philosophy
+
+Athena evolves by improving one capability at a time.
+
+Each capability should:
+
+* Build upon the existing Core.
+* Solve one problem well before introducing additional complexity.
+* Remain modular and independently testable.
+* Preserve architectural stability.
+
+New technologies should be introduced only when they solve a demonstrated need. Complexity should be earned rather than assumed.
 
 Architecture before features.

@@ -172,8 +172,13 @@ class ThoughtPipeline:
     def _extract_candidates(self, thought: Thought) -> None:
         """Stage 3a: Extract knowledge candidates from the completed conversation."""
         if self.knowledge_manager is not None:
-            # Use full conversation context (history + current input) for extraction
-            conversation = "\n".join(thought.history) + f"\nUser: {thought.user_input}" if thought.history else thought.user_input
+            # Use full conversation context (history + current input + assistant response) for extraction
+            # Include history + user input + assistant response so extractor can learn from the complete interaction
+            parts = list(thought.history) if thought.history else []
+            parts.append(f"User: {thought.user_input}")
+            if thought.response:
+                parts.append(f"Assistant: {thought.response}")
+            conversation = "\n".join(parts) if parts else thought.user_input
             self.knowledge_manager.extract_candidates(conversation)
         
         thought.metadata["stage"] = "candidates_extracted"

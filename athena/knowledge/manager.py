@@ -72,6 +72,7 @@ class KnowledgeManager:
         response = self.provider.call(prompt)
         
         # Parse response into candidate facts (simple newline-separated format)
+        extracted_candidates = []
         if response:
             for line in str(response).strip().split("\n"):
                 line = line.strip()
@@ -82,13 +83,14 @@ class KnowledgeManager:
                         confidence=0.8,
                         category="extracted"
                     )
+                    extracted_candidates.append(candidate)
                     if self.working_memory is not None:
                         self.working_memory.store_candidate(
                             statement=candidate.statement,
                             confidence=candidate.confidence,
                             category=candidate.category
                         )
-        return []
+        return extracted_candidates
 
     def add(self, knowledge) -> None:
         """Add a knowledge entry to the storage."""

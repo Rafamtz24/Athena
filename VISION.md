@@ -2,11 +2,8 @@
 
 ## Mission
 
-Athena is a local-first cognitive operating system designed to help one person think, learn, create, and act more effectively.
+Athena is a program you conect a lenguage model to that allows the lenguage model to best serve your individual needs, it adds a persistent memory through a cognition pipeline where the model not only learns new facts but reasons internally with them after the response has been generated. Enabling the chatbot to learn over time.
 
-Athena is not simply a chatbot.
-
-It is a long-term AI platform built around clean architecture, modularity, privacy, and extensibility.
 
 ## Core Principles
 
@@ -31,11 +28,9 @@ Athena is:
 ## What Athena Is Not
 
 Athena is not:
-
+- just a RAG system
 - Just another chatbot.
-- A wrapper around a single LLM.
 - Dependent on one provider.
-- Built around trends.
 - Designed for unnecessary complexity.
 
 ## Long-Term Goals
@@ -51,6 +46,7 @@ Athena should eventually be able to:
 - Automate repetitive work.
 - Interact naturally through voice and text.
 - Coordinate multiple AI providers when appropriate.
+- Do not add unecessary complexity, everything must serve a purpouse.
 
 ## Architectural Philosophy
 
