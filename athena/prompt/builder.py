@@ -37,6 +37,29 @@ class PromptBuilder:
                 lines.append(memory)
 
         lines.extend([
+            "",
+            "====================",
+            "",
+            "Candidate Facts",
+            "",
+            "====================",
+            "",
+        ])
+
+        candidates = getattr(thought, 'candidates', None)
+        if not candidates:
+            lines.append("(None)")
+        else:
+            for candidate in thought.candidates:
+                # Format: statement (confidence=X, category=Y)
+                if hasattr(candidate, 'statement'):
+                    conf = getattr(candidate, 'confidence', 0.0)
+                    cat = getattr(candidate, 'category', '')
+                    lines.append(f"{candidate.statement} (confidence={conf}, category={cat})")
+                else:
+                    lines.append(str(candidate))
+
+        lines.extend([
             "====================",
             "",
             "Knowledge",

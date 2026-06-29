@@ -46,3 +46,7 @@ class LMStudioProvider:
             return response.json()["choices"][0]["message"]["content"]
         except Exception as e:
             return f"LM Studio Error: {e}"
+    
+        def call(self, prompt: str) -> str:
+            """Alias for generate() to match KnowledgeManager expectations."""
+            return self.generate(prompt)

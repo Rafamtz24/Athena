@@ -91,6 +91,7 @@ class ThoughtPipeline:
         Returns:
             The final response string from the thought, or None if not set.
         """
+        # Reasoning Phase: Load memory and knowledge, generate response (semantic memory only)
         self._initialize(thought)
         self._load_memory(thought)
         self._load_knowledge(thought)
@@ -100,6 +101,10 @@ class ThoughtPipeline:
         engine = CognitiveEngine(self.provider)
         thought = engine.process(thought)
         self._build_response(thought)
+        
+        # Learning Phase: Extract, validate knowledge (separate from reasoning)
+        self._extract_candidates(thought)
+        self._validate_knowledge(thought)
         self._reflect(thought)
         self._finalize(thought)
 
@@ -164,6 +169,23 @@ class ThoughtPipeline:
         )
         bus.publish(event)
 
+    def _extract_candidates(self, thought: Thought) -> None:
+        """Stage 3a: Extract knowledge candidates from the completed conversation."""
+        if self.knowledge_manager is not None:
+            # Use full conversation context (history + current input) for extraction
+            conversation = "\n".join(thought.history) + f"\nUser: {thought.user_input}" if thought.history else thought.user_input
+            self.knowledge_manager.extract_candidates(conversation)
+        
+        thought.metadata["stage"] = "candidates_extracted"
+        bus = get_event_bus()
+        event = Event(
+            type="CandidatesExtracted",
+            source="thought_pipeline",
+            payload={"user_input": thought.user_input},
+            metadata={"stage": "candidates_extracted"},
+        )
+        bus.publish(event)
+
     def _reason(self, thought: Thought) -> None:
         """Stage 4: Perform reasoning on the user input."""
         thought.metadata["stage"] = "reasoned"
@@ -212,8 +234,33 @@ class ThoughtPipeline:
         )
         bus.publish(event)
 
+    def _validate_knowledge(self, thought: Thought) -> None:
+        """Stage 7: Validate candidate facts and promote verified ones to semantic memory."""
+        if self.memory_manager is not None:
+            candidates = self.memory_manager.get_candidates()
+            for idx, candidate in enumerate(candidates):
+                # Simple validation: confidence >= threshold means promote
+                if candidate.confidence >= 0.7:
+                    self.memory_manager.learn(candidate.statement, {
+                        "type": "knowledge",
+                        "confidence": candidate.confidence,
+                        "category": candidate.category
+                    })
+            # Clear candidates after processing (they've been promoted or discarded)
+            self.memory_manager.working_memory.clear()
+        
+        thought.metadata["stage"] = "knowledge_validated"
+        bus = get_event_bus()
+        event = Event(
+            type="KnowledgeValidated",
+            source="thought_pipeline",
+            payload={"user_input": thought.user_input},
+            metadata={"stage": "knowledge_validation"},
+        )
+        bus.publish(event)
+
     def _reflect(self, thought: Thought) -> None:
-        """Stage 7: Self-evaluate the processing outcome."""
+        """Stage 8: Self-evaluate the processing outcome."""
         thought.reflection = {"status": "completed"}
         thought.metadata["stage"] = "reflected"
         bus = get_event_bus()

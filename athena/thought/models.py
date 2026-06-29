@@ -53,6 +53,7 @@ class Thought:
     metadata: dict = field(default_factory=dict)
     trace: dict = field(default_factory=dict)
     history: list = field(default_factory=list)
+    candidates: list = field(default_factory=list)
 
     def set_user_input(self, user_input: str):
         """Set the user input for this thought."""

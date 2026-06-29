@@ -63,3 +63,17 @@ class MemoryManager:
 
     def query_semantic(self):
         return self.semantic_memory.query()
+
+    # -- Candidate Memory Interface --
+
+    def store_candidate(self, content, metadata=None):
+        """Store a knowledge candidate in working memory."""
+        return self.working_memory.store_candidate(content, metadata)
+
+    def get_candidates(self):
+        """Retrieve all knowledge candidates from working memory."""
+        return self.working_memory.get_candidates()
+
+    def remove_candidate(self, index):
+        """Remove a candidate from working memory by index."""
+        return self.working_memory.remove_candidate(index)

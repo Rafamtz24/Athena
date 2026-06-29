@@ -8,10 +8,10 @@ from .models import KnowledgeEntry, KnowledgeQuery, KnowledgeResult, KnowledgeCa
 class KnowledgeManager:
     """Placeholder for knowledge management operations."""
 
-    def __init__(self, provider=None) -> None:
-        """Initialize the knowledge manager with an empty candidate list and empty knowledge storage."""
+    def __init__(self, working_memory=None, provider=None) -> None:
+        """Initialize the knowledge manager using WorkingMemory for candidates."""
+        self.working_memory = working_memory
         self.provider = provider
-        self.candidates = []
         self.knowledge = []
 
     def add_entry(self, entry: KnowledgeEntry) -> str:
@@ -35,12 +35,19 @@ class KnowledgeManager:
         return ""
 
     def add_candidate(self, candidate: KnowledgeCandidate) -> None:
-        """Add a knowledge candidate to the collection."""
-        self.candidates.append(candidate)
+        """Add a knowledge candidate to WorkingMemory."""
+        if self.working_memory is not None:
+            self.working_memory.store_candidate(
+                statement=candidate.statement,
+                confidence=candidate.confidence,
+                category=candidate.category
+            )
 
     def get_candidates(self) -> List[KnowledgeCandidate]:
-        """Get all knowledge candidates. Returns the candidate list."""
-        return self.candidates
+        """Get all knowledge candidates from WorkingMemory."""
+        if self.working_memory is not None:
+            return self.working_memory.get_candidates()
+        return []
 
     def _build_extraction_prompt(self, conversation: str) -> str:
         """Build extraction prompt for knowledge extraction."""
@@ -57,7 +64,30 @@ class KnowledgeManager:
         return "\n".join(self.knowledge)
 
     def extract_candidates(self, conversation: str) -> List[Any]:
-        """Extract knowledge candidates from a conversation. Returns empty list for now."""
+        """Extract knowledge candidates from a conversation using the provider and store in WorkingMemory."""
+        if self.provider is None:
+            return []
+        
+        prompt = self._build_extraction_prompt(conversation)
+        response = self.provider.call(prompt)
+        
+        # Parse response into candidate facts (simple newline-separated format)
+        if response:
+            for line in str(response).strip().split("\n"):
+                line = line.strip()
+                if line and len(line) > 10:
+                    from athena.knowledge.models import KnowledgeCandidate
+                    candidate = KnowledgeCandidate(
+                        statement=line,
+                        confidence=0.8,
+                        category="extracted"
+                    )
+                    if self.working_memory is not None:
+                        self.working_memory.store_candidate(
+                            statement=candidate.statement,
+                            confidence=candidate.confidence,
+                            category=candidate.category
+                        )
         return []
 
     def add(self, knowledge) -> None:
@@ -67,3 +97,20 @@ class KnowledgeManager:
     def all(self):
         """Return all stored knowledge entries."""
         return self.knowledge
+
+    def promote_candidate(self, candidate) -> bool:
+        """Promote a candidate fact to semantic memory. Returns True if successful."""
+        from athena.memory.models import MemoryEntry
+        entry = MemoryEntry(content=candidate.statement, metadata={
+            "type": "knowledge",
+            "confidence": candidate.confidence,
+            "category": candidate.category
+        })
+        self.knowledge.append(entry.content)
+        return True
+
+    def discard_candidate(self, index: int) -> bool:
+        """Remove a candidate from WorkingMemory by index."""
+        if self.working_memory is not None:
+            return self.working_memory.remove_candidate(index)
+        return False
