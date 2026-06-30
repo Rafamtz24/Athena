@@ -240,19 +240,50 @@ class ThoughtPipeline:
         bus.publish(event)
 
     def _validate_knowledge(self, thought: Thought) -> None:
-        """Stage 7: Validate candidate facts and promote verified ones to semantic memory."""
+        """Stage 7: Validate candidate facts and promote verified ones to semantic memory.
+        
+        Uses KnowledgeValidator to classify candidates as:
+        - Duplicate: already exists in Semantic Memory (rejected)
+        - New Fact: unique knowledge worth storing (promoted)
+        - Possible Conflict: contradicts existing entry (stored for reconciliation, NOT promoted)
+        """
+        from athena.knowledge.validator import KnowledgeValidator
+        
         if self.memory_manager is not None:
             candidates = self.memory_manager.get_candidates()
+            
+            # Get semantic memory reference for conflict detection
+            semantic_mem = self.memory_manager.semantic_memory
+            
+            validator = KnowledgeValidator(semantic_mem)
+            
             for idx, candidate in enumerate(candidates):
-                # Simple validation: confidence >= threshold means promote
-                if candidate.confidence >= 0.7:
+                classification, conflict_id = validator.classify(
+                    candidate.statement,
+                    candidate.confidence,
+                    candidate.category
+                )
+                
+                if classification == 'duplicate':
+                    # Duplicate: skip (do not update Semantic Memory)
+                    pass
+                elif classification == 'new_fact':
+                    # New fact: promote to semantic memory
                     self.memory_manager.learn(candidate.statement, {
                         "type": "knowledge",
                         "confidence": candidate.confidence,
                         "category": candidate.category
                     })
+                elif classification == 'possible_conflict':
+                    # Possible conflict: do NOT update Semantic Memory
+                    # Conflict is recorded in validator.conflicts for future reconciliation
+                    pass
+            
             # Clear candidates after processing (they've been promoted or discarded)
             self.memory_manager.working_memory.clear()
+            
+            # Store detected conflicts in thought metadata for future reconciliation
+            thought.metadata["conflicts"] = validator.get_conflicts()
         
         thought.metadata["stage"] = "knowledge_validated"
         bus = get_event_bus()

@@ -2,7 +2,7 @@
                                      USER
                                       │
                                       ▼
-                               Create Thought
+                               Create prompt
                                       │
                      ┌────────────────┴────────────────┐
                      │                                 │
@@ -47,7 +47,7 @@
                                                                   ▼
                                                         Semantic Memory
                                                               Updated
-                                                                  │
-                                                                  ▼
-                                                           Thought Complete
+                                                                  
+                                                                  
+                                                           
 ```
