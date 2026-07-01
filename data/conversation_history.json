@@ -1,28 +1,8 @@
 {
   "history": [
-    "User: hello",
-    "Assistant: \n\nHello! I'm Athena, your local-first AI cognitive operating system. I run directly on your device for fast processing, strong privacy, and reliable assistance. How can I help you today?",
-    "User: my name is rafael",
-    "Assistant: \n\nHello again, Rafael! Nice to meet you. I'm Athena, your local-first AI cognitive operating system running directly on your device for fast processing and strong privacy. What can I help you with today?",
-    "User: my favorite food is pizza",
-    "Assistant: \n\nGot it, Rafael! I've noted down that your favorite food is pizza. \n\nIs there anything specific about pizza (like your preferred toppings) or any other details you'd like me to remember for you?",
-    "User: hello",
-    "Assistant: LM Studio Error: HTTPConnectionPool(host='127.0.0.1', port=1234): Max retries exceeded with url: /v1/chat/completions (Caused by NewConnectionError(\"HTTPConnection(host='127.0.0.1', port=1234): Failed to establish a new connection: [WinError 10061] No connection could be made because the target machine actively refused it\"))",
-    "User: hello",
-    "Assistant: Hello again, Rafael! It seems there was a technical glitch. I'm here and ready to assist you. Did you have something specific in mind regarding pizza or anything else?",
-    "User: a glitch?",
-    "Assistant: It looks like there was a temporary issue with the connection. Everything should be working fine now.\n\nHello again, Rafael! If you have any more questions or need assistance regarding pizza or anything else, feel free to ask. Whether it's about toppings, recipes, or just chat about your favorite food, I'm here to help!",
-    "User: what glithc?",
-    "Assistant: It looks like there might have been a typo. You asked about \"a glitch?\".\n\nIf you're experiencing any issues or if something isn't working as expected, feel free to let me know! I can help troubleshoot or provide information based on your needs. For example, if you want to talk more about pizza, ask about recipes, toppings, or anything else related to it. How can I assist you today, Rafael?",
-    "User: my favorite color is blue",
-    "Assistant: Got it, Rafael! Your favorite color is blue. \n\nIs there anything specific you'd like to know or talk about related to the color blue? Maybe you have a favorite shade of blue, or perhaps you're interested in places, objects, or concepts associated with the color blue. Let me know how I can assist you further!",
-    "User: hello",
-    "Assistant: Hello! It's nice to meet you. You mentioned your favorite color is blue. Blue is a wonderful choice; it can evoke feelings of calmness and serenity. Is there anything specific you'd like to talk about related to the color blue, or do you have any questions? Whether it\u2019s about shades of blue, places associated with the color, or anything else, feel free to let me know!",
-    "User: i just want to say, my favorite kind of animal is the dog",
-    "Assistant: Of course, Rafael! Dogs are indeed wonderful companions. They come in a variety of breeds, each with its own unique personality and characteristics. Whether it\u2019s loyalty, intelligence, or playfulness, dogs can bring so much joy into people's lives.\n\nDo you have a favorite breed of dog? Or perhaps there\u2019s something specific about dogs that you find endearing? I\u2019d love to hear more about your connection with these amazing animals!",
-    "User: cokcer spaniel because my dog is a cocker spaniel and i love her",
-    "Assistant: That's wonderful, Rafael! Cocker Spaniels are known for their friendly and affectionate nature. They often make great family pets due to their playful and social personalities.\n\nDo you have any specific stories or experiences with your Cocker Spaniel that you'd like to share? Or perhaps you're interested in learning more about this breed\u2014such as common health issues, training tips, or care routines?\n\nI'm here to help and support you in any way I can!",
-    "User: thank you!",
-    "Assistant: You're welcome, Rafael! If you have any more questions or want to share more stories about your Cocker Spaniel, or if there's anything else I can assist with, feel free to let me know.\n\nHave a great day!"
+    "User: say my name",
+    "Assistant: Rafael",
+    "User: i have a dog",
+    "Assistant: You have a dog. Is there anything specific you'd like to know or discuss related to your dog?"
   ]
 }

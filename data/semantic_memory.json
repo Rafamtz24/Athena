@@ -1,9 +1,19 @@
 {
   "entries": [
     {
-      "id": "57f79e1f-e8c3-48ca-a1e7-f350b7f22225",
-      "timestamp": "2026-07-01T11:47:54.151424+00:00",
-      "content": "User's favorite food is pizza",
+      "id": "ead86918-6658-410d-bbeb-4de3bd55c79e",
+      "timestamp": "2026-07-01T12:29:44.612291+00:00",
+      "content": "User's name is Rafael",
+      "metadata": {
+        "type": "knowledge",
+        "confidence": 0.8,
+        "category": "extracted"
+      }
+    },
+    {
+      "id": "af27fbc7-d5c8-413a-9e5a-9d58ad5cf37d",
+      "timestamp": "2026-07-01T12:31:04.788344+00:00",
+      "content": "User has a dog",
       "metadata": {
         "type": "knowledge",
         "confidence": 0.8,
