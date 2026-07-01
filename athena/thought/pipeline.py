@@ -1,4 +1,4 @@
-﻿"""""
+﻿"""
 Athena Thought Pipeline
 
 Defines the ThoughtPipeline class that orchestrates the processing of a Thought object
@@ -104,7 +104,7 @@ class ThoughtPipeline:
         
         # Learning Phase: Extract, validate knowledge (separate from reasoning)
         self._extract_candidates(thought)
-        self._validate_knowledge(thought)
+        await self._validate_knowledge(thought)
         self._reflect(thought)
         self._finalize(thought)
 
@@ -239,7 +239,7 @@ class ThoughtPipeline:
         )
         bus.publish(event)
 
-    def _validate_knowledge(self, thought: Thought) -> None:
+    async def _validate_knowledge(self, thought: Thought) -> None:
         """Stage 7: Validate candidate facts and promote verified ones to semantic memory.
         
         Uses KnowledgeValidator to classify candidates as:
@@ -298,7 +298,7 @@ class ThoughtPipeline:
                             break
                 
                 # Reconcile all conflicts at once
-                reconciliation_results = await reconciler.reconcile(conflicts, semantic_mem)
+                reconciliation_results = reconciler.reconcile(conflicts, semantic_mem)
                 
                 # Store reconciliation results in thought metadata
                 thought.metadata["reconciliation"] = {

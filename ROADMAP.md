@@ -31,43 +31,103 @@ The Core provides the stable foundation upon which all future capabilities will 
 
 ---
 
+## Athena MVP
+
+Status: **Complete**
+
+### Verification Date
+
+2026-07-01
+
+### Verified Capabilities
+
+* ✓ Capability 1 — Conversation Persistence
+* ✓ Capability 2 — Semantic Retrieval
+* ✓ Capability 3 — Memory Reconciliation
+* ✓ Capability 5 — Configuration System
+* ✓ Capability 6 — Terminal Chat Interface
+* ✓ Persistent Semantic Memory
+* ✓ Memory Reconciliation (bug fix applied)
+
+### Verification Results
+
+* Total scenarios tested: 18
+* Passed: 18
+* Failed: 0
+
+All MVP capabilities have been verified to work together as a complete system.
+
+---
+
 # Capability Development
 
-## Capability 1 — Semantic Retrieval
+## Capability 1 — Conversation Persistence
+
+### Goal
+
+Persist conversation history across application restarts.
+
+### Status: **Completed**
+
+* History persists to `data/conversation_history.json`
+* Automatically loaded on startup
+* Automatically saved after each conversation turn
+
+---
+
+## Capability 2 — Semantic Retrieval
 
 ### Goal
 
 Retrieve only the memories relevant to the current thought.
 
-### Planned Improvements
+### Status: **Completed**
 
-* Relevant retrieval
-* Query scoring
-* Memory ranking
-* Future support for embeddings (when justified)
-
-Status:
-
-In Progress
+* Keyword-based filtering with stop-word removal
+* Discriminative word matching
+* Backward compatible fallback
 
 ---
 
-## Capability 2 — Memory Reconciliation
+## Capability 3 — Memory Reconciliation
 
 ### Goal
 
 Maintain a consistent knowledge base by resolving duplicate and conflicting memories.
 
-### Planned Improvements
+### Status: **Completed**
 
-* Duplicate detection
-* Contradiction detection
-* Memory merging
-* Confidence management
+* Duplicate detection (exact and substring matching)
+* Conflict detection (negation patterns)
+* LLM-based reconciliation (REPLACE/KEEP/REJECT)
 
 ---
 
-## Capability 3 — Cognitive Planner
+## Knowledge Extraction Contract — Quality Improvement
+
+### Goal
+
+Strengthen the extraction contract so Semantic Memory only receives clean, explicit, atomic knowledge.
+
+### Status: **Completed**
+
+* Removed all concrete factual examples from extraction prompt
+* Added strict rules: NEVER infer, NEVER invent, NEVER use prior knowledge
+* Structural format examples only (no factual examples)
+* Enhanced parser rejects: headings, markdown, conversation labels, explanations, summaries
+* Duplicate prevention in Semantic Memory (exact and case-insensitive)
+* NONE response handling produces zero candidates
+
+### Verification
+
+* 9/9 tests passed
+* Prompt contains no concrete factual examples
+* Parser rejects all invalid formats
+* Parser accepts clean atomic facts
+
+---
+
+## Capability 4 — Cognitive Planner
 
 ### Goal
 
@@ -82,26 +142,43 @@ Determine which cognitive modules should participate in solving each request.
 
 ---
 
-## Capability 4 — Tool Orchestration
+## Capability 5 — Configuration System
 
 ### Goal
 
-Allow Athena to safely interact with external systems.
+Centralize Athena's runtime configuration while preserving all existing behavior.
 
-### Planned Improvements
+### Status: **Completed**
 
-* Tool Framework
-* Tool Registry
-* Permission System
-* Filesystem Tools
-* Terminal Tools
-* Browser Tools
-* Python Runtime
-* Desktop Automation
+* Centralized configuration module (`athena/config/settings.py`)
+* Provider configuration (base_url, model, temperature)
+* Model configuration (LLM settings)
+* Semantic Memory storage path
+* Conversation History storage path
+* Learning enable/disable
+* Retrieval settings
+* All existing default behavior preserved
 
 ---
 
-## Capability 5 — Personal Assistant
+## Capability 6 — Terminal Chat Interface
+
+### Goal
+
+Provide the simplest interactive interface for Athena.
+
+### Status: **Completed**
+
+* Minimal terminal chat interface (`athena/terminal_chat.py`)
+* Continuous conversation loop
+* Clean exit on `exit` or `quit`
+* Uses existing Brain without modifying its public API
+* Uses existing Configuration System
+* Preserves all existing behavior
+
+---
+
+## Capability 7 — Personal Assistant
 
 ### Goal
 
@@ -120,7 +197,7 @@ Provide practical assistance in everyday tasks.
 
 ---
 
-## Capability 6 — Autonomy
+## Capability 8 — Autonomy
 
 ### Goal
 
@@ -138,7 +215,7 @@ Operate independently when appropriate.
 
 ---
 
-## Capability 7 — Intelligence
+## Capability 9 — Intelligence
 
 ### Goal
 
