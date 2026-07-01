@@ -1,4 +1,4 @@
-﻿"""
+﻿"""""
 Athena Thought Pipeline
 
 Defines the ThoughtPipeline class that orchestrates the processing of a Thought object
@@ -245,9 +245,12 @@ class ThoughtPipeline:
         Uses KnowledgeValidator to classify candidates as:
         - Duplicate: already exists in Semantic Memory (rejected)
         - New Fact: unique knowledge worth storing (promoted)
-        - Possible Conflict: contradicts existing entry (stored for reconciliation, NOT promoted)
+        - Possible Conflict: contradicts existing entry (reconciled via LLM)
+        
+        For possible conflicts, invokes the reconciler to resolve using LLM.
         """
         from athena.knowledge.validator import KnowledgeValidator
+        from athena.knowledge.reconciler import MemoryReconciler
         
         if self.memory_manager is not None:
             candidates = self.memory_manager.get_candidates()
@@ -256,6 +259,9 @@ class ThoughtPipeline:
             semantic_mem = self.memory_manager.semantic_memory
             
             validator = KnowledgeValidator(semantic_mem)
+            
+            # Track which conflicts correspond to which candidates
+            conflict_to_candidate = {}
             
             for idx, candidate in enumerate(candidates):
                 classification, conflict_id = validator.classify(
@@ -275,9 +281,37 @@ class ThoughtPipeline:
                         "category": candidate.category
                     })
                 elif classification == 'possible_conflict':
-                    # Possible conflict: do NOT update Semantic Memory
-                    # Conflict is recorded in validator.conflicts for future reconciliation
-                    pass
+                    # Possible conflict: reconcile via LLM
+                    conflict_to_candidate[idx] = (candidate, conflict_id)
+            
+            # Reconcile all possible conflicts using the reconciler
+            if self.provider is not None and conflict_to_candidate:
+                reconciler = MemoryReconciler(self.provider)
+                
+                # Build list of conflict records for reconciliation
+                conflicts = []
+                for idx, (candidate, conflict_id) in conflict_to_candidate.items():
+                    # Find the conflict record from validator.conflicts
+                    for c in validator.get_conflicts():
+                        if c['existing_id'] == conflict_id or c['candidate_statement'] == candidate.statement:
+                            conflicts.append(c)
+                            break
+                
+                # Reconcile all conflicts at once
+                reconciliation_results = await reconciler.reconcile(conflicts, semantic_mem)
+                
+                # Store reconciliation results in thought metadata
+                thought.metadata["reconciliation"] = {
+                    "total_conflicts": len(conflicts),
+                    "results": reconciliation_results
+                }
+            
+            elif conflict_to_candidate:
+                # No provider available - keep existing memory for all conflicts
+                thought.metadata["reconciliation"] = {
+                    "skipped": True,
+                    "reason": "No LLM provider configured"
+                }
             
             # Clear candidates after processing (they've been promoted or discarded)
             self.memory_manager.working_memory.clear()
