@@ -35,8 +35,16 @@ class CognitiveEngine:
             thought.trace["prompt"] = {
                 "text": prompt
             }
-            response = self.provider.generate(prompt)
-            thought.set_response(response)
+            try:
+                response = self.provider.generate(prompt)
+                thought.set_response(response)
+            except Exception as e:
+                # Provider failed — set error trace, provide fallback response
+                thought.trace["error"] = {
+                    "source": "provider",
+                    "message": str(e)
+                }
+                thought.set_response("I'm sorry, I'm currently unable to process your request. Please try again later.")
         result = thought
         logger.info("Cognitive Engine Completed")
         return result

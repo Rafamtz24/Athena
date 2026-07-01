@@ -127,6 +127,29 @@ Strengthen the extraction contract so Semantic Memory only receives clean, expli
 
 ---
 
+## Runtime Error Isolation
+
+### Goal
+
+Prevent runtime and infrastructure errors from entering the Learning Pipeline or Semantic Memory.
+
+### Status: **Completed**
+
+* Provider raises `RuntimeError` on failure instead of returning error strings
+* `KnowledgeManager.extract_candidates()` catches provider errors — returns empty list (skip learning)
+* `CognitiveEngine.process()` catches provider errors — sets error trace, provides fallback response
+* `MemoryReconciler._resolve()` catches provider errors — returns REJECT (safe default)
+* Provider failures never become KnowledgeCandidates or Semantic Memory entries
+* Learning fails gracefully — conversation continues even when provider is unavailable
+
+### Verification
+
+* Provider unavailable: Zero candidates, Semantic Memory unchanged
+* Provider available: Knowledge extraction works correctly
+* Repeated failures: Memory integrity preserved, no error messages stored
+
+---
+
 ## Capability 4 — Cognitive Planner
 
 ### Goal
