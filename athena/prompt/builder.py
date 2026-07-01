@@ -17,7 +17,7 @@ class PromptBuilder:
         if not thought.history:
             lines.append("(None)")
         else:
-            for item in thought.history[-10:]:
+            for item in thought.history:
                 lines.append(item)
 
         lines.extend([
