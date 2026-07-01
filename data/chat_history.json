@@ -1,0 +1,18 @@
+{
+  "history": [
+    "User: test persist",
+    "Assistant: I'm not sure what you mean by \"test persist.\" Could you please provide more details or clarify your request? This will help me understand and assist you better.",
+    "User: another test",
+    "Assistant: I'm not sure what you're looking for with \"another test.\" Could you please provide more information about what kind of test or query you have in mind? This will help me assist you effectively.",
+    "User: prune test",
+    "Assistant: I'm not sure what you mean by \"prune test.\" Could you please provide more details or clarify your request? This will help me understand and assist you better. Are you looking to run a specific type of test, or are you referring to a technical term related to pruning in a certain context?",
+    "User: hello",
+    "Assistant: Hello! I'm Athena, a local-first AI cognitive operating system. How can I assist you today?",
+    "User: whats my name",
+    "Assistant: I don't have access to personal information like your name. However, you can tell me your name if you'd like me to use it in our conversation! How can I assist you today?",
+    "User: my name is rafael",
+    "Assistant: Hello, Rafael! Nice to meet you. How can I assist you today?",
+    "User: hello",
+    "Assistant: Hello, Rafael! How can I assist you today?"
+  ]
+}

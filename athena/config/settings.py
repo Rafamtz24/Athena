@@ -23,7 +23,8 @@ class ProviderSettings:
 class StorageSettings:
     """Paths for persistent storage."""
 
-    conversation_history_path: str = "data/conversation_history.json"
+    working_memory_path: str = "data/working_memory.json"
+    chat_history_path: str = "data/chat_history.json"
     semantic_memory_path: str = "data/semantic_memory.json"
 
 
@@ -43,6 +44,13 @@ class LearningSettings:
 
 
 @dataclass(frozen=False)
+class PromptSettings:
+    """Settings for prompt construction."""
+
+    csize: int = 4000
+
+
+@dataclass(frozen=False)
 class AppSettings:
     """
     Centralized application settings for Athena AI platform.
@@ -55,6 +63,7 @@ class AppSettings:
         storage: Persistent storage path configuration.
         retrieval: Semantic memory retrieval configuration.
         learning: Learning pipeline configuration.
+        prompt: Prompt construction configuration.
     """
 
     app_name: str = "Athena"
@@ -64,6 +73,7 @@ class AppSettings:
     storage: StorageSettings = field(default_factory=StorageSettings)
     retrieval: RetrievalSettings = field(default_factory=RetrievalSettings)
     learning: LearningSettings = field(default_factory=LearningSettings)
+    prompt: PromptSettings = field(default_factory=PromptSettings)
 
     def __post_init__(self):
         """Validate settings after initialization."""
