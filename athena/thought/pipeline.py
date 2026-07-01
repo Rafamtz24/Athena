@@ -243,6 +243,7 @@ class ThoughtPipeline:
         """Stage 7: Validate candidate facts and promote verified ones to semantic memory.
         
         Uses KnowledgeValidator to classify candidates as:
+        - Low Quality: placeholder/incomplete values (rejected deterministically)
         - Duplicate: already exists in Semantic Memory (rejected)
         - New Fact: unique knowledge worth storing (promoted)
         - Possible Conflict: contradicts existing entry (reconciled via LLM)
@@ -270,7 +271,10 @@ class ThoughtPipeline:
                     candidate.category
                 )
                 
-                if classification == 'duplicate':
+                if classification == 'low_quality':
+                    # Low quality (placeholder/incomplete): discard silently
+                    pass
+                elif classification == 'duplicate':
                     # Duplicate: skip (do not update Semantic Memory)
                     pass
                 elif classification == 'new_fact':

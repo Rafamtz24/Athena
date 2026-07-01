@@ -2,9 +2,10 @@
 Athena Knowledge Validator
 
 Classifies knowledge candidates as:
-- Duplicate: already exists in Semantic Memory (semantic similarity)
-- New Fact: unique knowledge worth storing
-- Possible Conflict: conflicts with existing Semantic Memory entry
+- Low Quality: contains placeholder, incomplete, or unresolved values (rejected)
+- Duplicate: already exists in Semantic Memory (semantic similarity) (rejected)
+- New Fact: unique knowledge worth storing (promoted)
+- Possible Conflict: contradicts existing Semantic Memory entry (queued for reconciliation)
 
 This is the foundation for Capability 2: Memory Reconciliation.
 It does NOT resolve conflicts; it only detects and records them.
@@ -18,17 +19,69 @@ class KnowledgeValidator:
     """
     Validates knowledge candidates against existing Semantic Memory.
 
-    Classification logic (simple string-based):
+    Classification logic (deterministic, string-based):
+        - Low Quality: placeholder/incomplete values deterministically rejected
         - Duplicate: candidate statement is already present in semantic memory
         - Possible Conflict: candidate contradicts an existing entry
-        - New Fact: neither duplicate nor conflict
+        - New Fact: unique, valid knowledge worth storing
 
     Conflicts are stored in a list for future reconciliation by the Memory Reconciler.
     """
 
+    # Words that are never valid as knowledge values (placeholders)
+    _PLACEHOLDER_VALUES = frozenset({
+        'x', 'unknown', 'unspecified', 'n/a', 'null', 'none',
+        'someone', 'something', 'somebody', 'somewhere',
+    })
+
+    # Pronouns that indicate unresolved references when used as a value
+    _PRONOUN_VALUES = frozenset({
+        'her', 'him', 'it', 'they', 'she', 'he', 'them', 'its', 'his',
+    })
+
     def __init__(self, semantic_memory: SemanticMemory) -> None:
         self.semantic_memory = semantic_memory
         self.conflicts: List[dict] = []  # Stores detected conflicts for future reconciliation
+
+    @staticmethod
+    def _is_low_quality(statement: str) -> bool:
+        """Deterministically detect placeholder, incomplete, or unresolved values.
+
+        No LLM calls. Pure string/pattern matching.
+        """
+        text = statement.strip().lower()
+        if not text:
+            return True
+
+        words = text.split()
+        if not words:
+            return True
+
+        # -- Check the last word (most common position for the knowledge value) --
+        last_word = words[-1]
+        if last_word in KnowledgeValidator._PLACEHOLDER_VALUES | KnowledgeValidator._PRONOUN_VALUES:
+            return True
+
+        # -- Check for any occurrence of "something", "someone", "somebody", "somewhere" --
+        # These are never valid values in extracted knowledge
+        for w in words:
+            if w in {'something', 'someone', 'somebody', 'somewhere'}:
+                return True
+
+        # -- Check for standalone "x" as a word (not part of a valid name like "Xena") --
+        if ' x ' in f' {text} ':
+            return True
+
+        # -- Check for "unspecified" or "n/a" appearing anywhere --
+        if 'unspecified' in words or 'n/a' in words:
+            return True
+
+        # -- Check for patterns ending with "a place" or "a person" --
+        # e.g., "User lives in a place", "User is a person"
+        if text.endswith(' a place') or text.endswith(' a person'):
+            return True
+
+        return False
 
     def classify(self, statement: str, confidence: float, category: str) -> Tuple[str, Optional[str]]:
         """
@@ -36,12 +89,17 @@ class KnowledgeValidator:
 
         Returns:
             (classification, conflict_id_or_none)
-            
-            classification is one of: 'duplicate', 'new_fact', 'possible_conflict'
+
+            classification is one of: 'low_quality', 'duplicate', 'new_fact', 'possible_conflict'
             conflict_id is the ID of the conflicting entry if applicable, else None
-            
+
         If 'possible_conflict', Semantic Memory is NOT updated and the conflict is recorded.
+        If 'low_quality', the candidate is rejected — it contains placeholder/incomplete values.
         """
+        # First check: reject low-quality / placeholder facts deterministically
+        if self._is_low_quality(statement):
+            return ('low_quality', None)
+
         # Get all existing semantic memory entries as plain text strings
         existing_entries = []
         for entry in self.semantic_memory.query():
@@ -50,15 +108,16 @@ class KnowledgeValidator:
             elif isinstance(entry, str):
                 existing_entries.append((entry, None))
 
-        # Check for duplicate: exact or near-exact match (case-insensitive)
-        statement_lower = statement.strip().lower()
+        # Check for duplicate: normalized match (whitespace, trailing punctuation, case)
+        from athena.memory.semantic import SemanticMemory
+        normalized_new = SemanticMemory.normalize(statement)
         for content, _ in existing_entries:
-            content_lower = content.strip().lower()
-            if statement_lower == content_lower:
+            normalized_existing = SemanticMemory.normalize(content)
+            if normalized_new == normalized_existing:
                 return ('duplicate', None)
             # Near-duplicate: one is substring of the other and both are meaningful length
-            if len(statement_lower) > 5 and len(content_lower) > 5:
-                if statement_lower in content_lower or content_lower in statement_lower:
+            if len(normalized_new) > 5 and len(normalized_existing) > 5:
+                if normalized_new in normalized_existing or normalized_existing in normalized_new:
                     return ('duplicate', None)
 
         # Check for conflict: candidate implies opposite meaning of existing entry

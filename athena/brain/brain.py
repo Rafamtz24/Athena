@@ -42,7 +42,9 @@ class AthenaBrain:
         self.provider = LMStudioProvider()
         self.memory_manager = MemoryManager()
         self.knowledge_manager = KnowledgeManager(
-            working_memory=self.memory_manager.working_memory, provider=self.provider
+            working_memory=self.memory_manager.working_memory,
+            provider=self.provider,
+            memory_manager=self.memory_manager
         )
         self.pipeline = ThoughtPipeline(
             self.memory_manager,

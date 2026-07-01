@@ -9,10 +9,11 @@ from .models import KnowledgeEntry, KnowledgeQuery, KnowledgeResult, KnowledgeCa
 class KnowledgeManager:
     """Placeholder for knowledge management operations."""
 
-    def __init__(self, working_memory=None, provider=None) -> None:
+    def __init__(self, working_memory=None, provider=None, memory_manager=None) -> None:
         """Initialize the knowledge manager using WorkingMemory for candidates."""
         self.working_memory = working_memory
         self.provider = provider
+        self.memory_manager = memory_manager
         self.knowledge: list[str] = []
 
     def add_entry(self, entry: KnowledgeEntry) -> str:
@@ -113,19 +114,31 @@ class KnowledgeManager:
     def retrieve(self, query: str) -> Optional[str]:
         """Retrieve knowledge based on query.
         
+        Queries SemanticMemory (via MemoryManager) for relevant facts.
         Uses simple keyword matching to filter relevant entries.
         Only returns entries that contain at least one significant word from the query.
-        If self.knowledge is empty, returns None.
-        Otherwise, returns only relevant knowledge entries joined by newlines.
+        If no semantic memory manager is available, falls back to self.knowledge.
+        Returns None if no knowledge is available.
         """
-        if not self.knowledge:
+        # Get entries from SemanticMemory (single source of truth)
+        entries = []
+        if self.memory_manager is not None:
+            semantic_entries = self.memory_manager.query_semantic()
+            for entry in semantic_entries:
+                if hasattr(entry, 'content') and entry.content:
+                    entries.append(str(entry.content))
+        else:
+            # Fallback to self.knowledge if no memory_manager configured
+            entries = list(self.knowledge)
+        
+        if not entries:
             return None
         
         # Normalize query: lowercase, split into words, filter short tokens
         query_words = [w.lower() for w in re.findall(r'[a-z]+', query)]
         
         # Filter out common stop words that are too generic to be discriminative
-        stop_words = {'the', 'a', 'an', 'is', 'are', 'was', 'were', 'be', 'been', 
+        stop_words = {'the', 'a', 'an', 'is', 'are', 'was', 'were', 'be', 'been',
                       'being', 'have', 'has', 'had', 'do', 'does', 'did', 'will',
                       'can', 'could', 'should', 'would', 'what', 'which', 'who',
                       'how', 'when', 'where', 'why', 'not', 'no', 'and', 'or',
@@ -134,20 +147,20 @@ class KnowledgeManager:
         
         discriminative_words = [w for w in query_words if len(w) > 2 and w not in stop_words]
         
-        # If no discriminative words found, return all knowledge (backward compatible)
+        # If no discriminative words found, return all entries
         if not discriminative_words:
-            return "\n".join(self.knowledge)
+            return "\n".join(entries)
         
         # Filter entries: keep only those containing at least one query word
         relevant_entries = []
-        for entry in self.knowledge:
+        for entry in entries:
             entry_lower = entry.lower()
             if any(word in entry_lower for word in discriminative_words):
                 relevant_entries.append(entry)
         
-        # If no relevant entries found, return all knowledge (backward compatible)
+        # If no relevant entries found, return all entries (backward compatible)
         if not relevant_entries:
-            return "\n".join(self.knowledge)
+            return "\n".join(entries)
         
         return "\n".join(relevant_entries)
 

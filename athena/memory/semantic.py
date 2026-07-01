@@ -86,18 +86,41 @@ class SemanticMemory:
             json.dump({"entries": entries_data}, f, indent=2, default=str)
         temp_path.replace(_SEMANTIC_MEMORY_PATH)
 
+    @staticmethod
+    def normalize(text: str) -> str:
+        """Normalize text for deterministic duplicate comparison.
+
+        Normalizes:
+            - leading whitespace
+            - trailing whitespace
+            - repeated internal whitespace (collapsed to single space)
+            - trailing punctuation (. ! ?)
+            - case (lowercased)
+
+        The original text is preserved for storage; the normalized form
+        is used only for comparison.
+        """
+        s = str(text).strip()
+        # Collapse repeated internal whitespace to single space
+        s = ' '.join(s.split())
+        # Strip trailing punctuation (. ! ?)
+        s = s.rstrip('.!?')
+        # Lowercase
+        return s.lower()
+
     def learn(self, content: Any, metadata: dict | None = None) -> str:
         """Store a factual entry. Returns the entry ID.
         
-        Duplicate prevention: if an entry with the same content (case-insensitive)
-        already exists, this method returns the existing entry's ID without
-        creating a duplicate.
+        Duplicate prevention: if a normalized equivalent already exists,
+        this method returns the existing entry's ID without creating a duplicate.
+        Normalization handles: whitespace, trailing punctuation, case.
         """
         content_str = str(content).strip()
+        normalized_new = self.normalize(content_str)
         
-        # Check for exact duplicate (case-insensitive)
+        # Check for normalized duplicate
         for entry in self._knowledge:
-            if str(entry.content).strip().lower() == content_str.lower():
+            if self.normalize(str(entry.content)) == normalized_new:
                 return entry.id
         
         entry = MemoryEntry(content=content_str, metadata=metadata or {})
