@@ -5,11 +5,18 @@ Core orchestration component that receives requests, reasons, delegates to provi
 and returns responses.
 """
 
+import json
+from pathlib import Path
+
+from athena.config.settings import get_settings
 from athena.debug.manager import DebugManager
 from athena.knowledge.manager import KnowledgeManager
 from athena.memory.manager import MemoryManager
 from athena.thought.models import Thought
 from athena.thought.pipeline import ThoughtPipeline
+
+# Storage location for persistent conversation history
+_HISTORY_PATH = Path(get_settings().storage.conversation_history_path)
 
 
 class AthenaBrain:
@@ -43,6 +50,30 @@ class AthenaBrain:
             self.provider,
         )
         self.history: list[str] = []  # Conversation history stored by the brain
+        self._ensure_storage_dir()
+        self._load_history()
+
+    def _ensure_storage_dir(self) -> None:
+        """Create the data directory if it does not exist."""
+        _HISTORY_PATH.parent.mkdir(parents=True, exist_ok=True)
+
+    def _load_history(self) -> None:
+        """Load conversation history from disk."""
+        if not _HISTORY_PATH.exists():
+            return
+        try:
+            with open(_HISTORY_PATH, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            self.history = data.get("history", [])
+        except (json.JSONDecodeError, KeyError, TypeError):
+            self.history = []
+
+    def _save_history(self) -> None:
+        """Save conversation history to disk."""
+        temp_path = _HISTORY_PATH.with_suffix(".json.tmp")
+        with open(temp_path, "w", encoding="utf-8") as f:
+            json.dump({"history": self.history}, f, indent=2)
+        temp_path.replace(_HISTORY_PATH)
 
     async def process(self, message: str) -> str:
         """
@@ -72,9 +103,11 @@ class AthenaBrain:
         self.history.append(f"User: {message}")
         self.history.append(f"Assistant: {response}")
 
+        # Persist conversation history to disk
+        self._save_history()
+
         # Store in episodic memory
         content = f"User:\n{message}\n\nAssistant:\n{response}"
         self.memory_manager.remember(content)
 
         return response
-

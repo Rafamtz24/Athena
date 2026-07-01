@@ -51,8 +51,64 @@ class KnowledgeManager:
         return []
 
     def _build_extraction_prompt(self, conversation: str) -> str:
-        """Build extraction prompt for knowledge extraction."""
-        return f"You extract durable user knowledge.\n\nExtract only long-term facts worth remembering.\n\nConversation:\n{conversation}"
+        """Build extraction prompt for knowledge extraction.
+        
+        The prompt enforces a strict output contract so the LLM returns
+        only durable knowledge explicitly stated in the conversation.
+        No concrete examples are provided to prevent hallucination.
+        """
+        return (
+            "You are a knowledge extractor for a personal assistant system.\n"
+            "Your job is to extract durable knowledge from a completed conversation.\n\n"
+            "STRICT RULES (follow all without exception):\n"
+            "1. Extract ONLY knowledge that is EXPLICITLY stated in the conversation.\n"
+            "2. NEVER infer, deduce, or guess information.\n"
+            "3. NEVER use prior knowledge or outside information.\n"
+            "4. NEVER use information from system prompts or instructions.\n"
+            "5. NEVER invent facts, even if they seem plausible.\n"
+            "6. If the conversation contains no durable knowledge, return exactly: NONE\n\n"
+            "WHAT TO EXTRACT:\n"
+            "- Explicit user preferences, identity, location, habits\n"
+            "- Explicit project knowledge, constraints, rules stated in the conversation\n"
+            "- Explicit long-term instructions given during the conversation\n"
+            "- Any fact that was explicitly stated and should persist across sessions\n\n"
+            "WHAT TO REJECT:\n"
+            "- Information not explicitly stated in the conversation\n"
+            "- Inferences or assumptions\n"
+            "- General knowledge or common facts\n"
+            "- Transient information (one-time explanations, temporary context)\n"
+            "- Assistant responses that are not persistent instructions\n\n"
+            "OUTPUT FORMAT (follow exactly):\n"
+            "- Return ONE atomic fact per line.\n"
+            "- Each fact must be self-contained and unambiguous.\n"
+            "- Each fact must represent exactly ONE piece of knowledge.\n"
+            "- Plain text only.\n"
+            "- No bullets, numbering, markdown, headings, or code blocks.\n"
+            "- No explanations, examples, or meta commentary.\n"
+            "- No conversation summaries or greetings.\n"
+            "- Use third person for facts about people or systems.\n"
+            "- Convert second person to third person (e.g., 'you live in X' becomes 'User lives in X').\n"
+            "- If there are NO durable facts, return exactly: NONE\n\n"
+            "KNOWLEDGE NORMALIZATION (CRITICAL - follow exactly):\n"
+            "- Preserve the EXACT semantic relationship from the original statement.\n"
+            "- Convert pronouns faithfully: 'My name is X' -> 'User's name is X'.\n"
+            "- Convert pronouns faithfully: 'My favorite color is X' -> 'User's favorite color is X'.\n"
+            "- Convert pronouns faithfully: 'I live in X' -> 'User lives in X'.\n"
+            "- NEVER change the relationship verb or attribute being stated.\n"
+            "- NEVER replace specific attributes with generic ones (e.g., do NOT convert 'favorite color is blue' to 'likes blue').\n"
+            "- NEVER drop or change the predicate of the original statement.\n"
+            "- The extracted fact must be a direct third-person translation of the original.\n\n"
+            "STRUCTURAL FORMAT EXAMPLES (showing format only, not content to extract):\n"
+            "Valid format: one fact per line, plain text\n"
+            "Invalid format: - bullet point\n"
+            "Invalid format: 1. numbered item\n"
+            "Invalid format: # heading\n"
+            "Invalid format: `code block`\n"
+            "Invalid format: User: label prefix\n"
+            "Invalid format: Assistant: label prefix\n\n"
+            "Conversation:\n"
+            "{conversation}"
+        ).format(conversation=conversation)
 
     def retrieve(self, query: str) -> Optional[str]:
         """Retrieve knowledge based on query.
@@ -96,32 +152,83 @@ class KnowledgeManager:
         return "\n".join(relevant_entries)
 
     def extract_candidates(self, conversation: str) -> List[Any]:
-        """Extract knowledge candidates from a conversation using the provider and store in WorkingMemory."""
+        """Extract knowledge candidates from a conversation using the provider and store in WorkingMemory.
+        
+        The parser enforces strict rejection rules to ensure only valid atomic facts
+        become KnowledgeCandidate objects.
+        """
         if self.provider is None:
             return []
         
         prompt = self._build_extraction_prompt(conversation)
         response = self.provider.call(prompt)
         
-        # Parse response into candidate facts (simple newline-separated format)
+        # Parse response into candidate facts following the output contract.
+        # Expected format: one fact per line, or "NONE" if no facts.
         extracted_candidates = []
-        if response:
-            for line in str(response).strip().split("\n"):
-                line = line.strip()
-                if line and len(line) > 10:
-                    from athena.knowledge.models import KnowledgeCandidate
-                    candidate = KnowledgeCandidate(
-                        statement=line,
-                        confidence=0.8,
-                        category="extracted"
-                    )
-                    extracted_candidates.append(candidate)
-                    if self.working_memory is not None:
-                        self.working_memory.store_candidate(
-                            statement=candidate.statement,
-                            confidence=candidate.confidence,
-                            category=candidate.category
-                        )
+        if not response:
+            return extracted_candidates
+        
+        text = str(response).strip()
+        
+        # If the LLM returns NONE, produce zero candidates
+        if text == "NONE":
+            return extracted_candidates
+        
+        for line in text.split("\n"):
+            line = line.strip()
+            
+            # Skip empty lines
+            if not line:
+                continue
+            
+            # Skip lines that are too short (likely formatting artifacts)
+            if len(line) < 5:
+                continue
+            
+            # Skip lines containing markdown formatting
+            if any(marker in line for marker in ['```', '``', '**', '__', '==']):
+                continue
+            
+            # Skip lines that are formatting characters
+            if all(c in '-*#>`_' for c in line[:3]):
+                continue
+            
+            # Skip lines that indicate conversation labels or formatting
+            if any(line.startswith(prefix) for prefix in
+                   ['User:', 'Assistant:', '- ', '* ', '# ', '> ', '`',
+                    '1.', '2.', '3.', '4.', '5.', '6.', '7.', '8.', '9.', '0.',
+                    'Fact:', 'Facts:', 'Example', 'Examples',
+                    'Long-term', 'Short-term', 'Conversation', 'Summary',
+                    'Valid format', 'Invalid format']):
+                continue
+            
+            # Skip lines that look like assistant commentary or meta-content
+            if any(line.lower().startswith(p) for p in
+                   ['the assistant', 'this conversation', 'in this conversation',
+                    'the user:', 'assistant:', 'note:', 'summary:',
+                    'in this conversation', 'these facts', 'this response',
+                    'here are', 'below are', 'the following']):
+                continue
+            
+            # Skip lines that contain conversation role labels anywhere
+            if 'User:' in line or 'Assistant:' in line:
+                continue
+            
+            from athena.knowledge.models import KnowledgeCandidate
+            candidate = KnowledgeCandidate(
+                statement=line,
+                confidence=0.8,
+                category="extracted"
+            )
+            extracted_candidates.append(candidate)
+            if self.working_memory is not None:
+                self.working_memory.store_candidate(
+                    statement=candidate.statement,
+                    confidence=candidate.confidence,
+                    category=candidate.category
+                )
+        
         return extracted_candidates
 
     def add(self, knowledge) -> None:

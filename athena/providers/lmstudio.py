@@ -6,6 +6,8 @@ Provides a placeholder implementation for LM Studio integration.
 
 import requests
 
+from athena.config.settings import get_settings
+
 
 class LMStudioProvider:
     """
@@ -13,11 +15,11 @@ class LMStudioProvider:
 
     Constructor accepts:
         base_url (str): The base URL of the LM Studio server.
-            Defaults to http://127.0.0.1:1234
+            Defaults to value from settings.provider.base_url
     """
 
-    def __init__(self, base_url: str = "http://127.0.0.1:1234"):
-        self.base_url = base_url
+    def __init__(self, base_url: str | None = None):
+        self.base_url = base_url or get_settings().provider.base_url
 
     def generate(self, prompt: str) -> str:
         """
@@ -32,21 +34,21 @@ class LMStudioProvider:
         try:
             url = f"{self.base_url}/v1/chat/completions"
             payload = {
-                "model": "qwen2.5-3b-instruct",
+                "model": get_settings().provider.model,
                 "messages": [
                     {
                         "role": "user",
                         "content": prompt
                     }
                 ],
-                "temperature": 0.7,
+                "temperature": get_settings().provider.temperature,
                 "stream": False
             }
             response = requests.post(url, json=payload)
             return response.json()["choices"][0]["message"]["content"]
         except Exception as e:
             return f"LM Studio Error: {e}"
-    
-        def call(self, prompt: str) -> str:
-            """Alias for generate() to match KnowledgeManager expectations."""
-            return self.generate(prompt)
+
+    def call(self, prompt: str) -> str:
+        """Alias for generate() to match KnowledgeManager expectations."""
+        return self.generate(prompt)

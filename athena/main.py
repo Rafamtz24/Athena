@@ -20,8 +20,8 @@ brain = AthenaBrain()
 
 
 app = FastAPI(
-    title="Athena",
-    version="0.2.0",
+    title=settings.app_name,
+    version=settings.version,
 )
 
 

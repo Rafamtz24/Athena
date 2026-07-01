@@ -1,0 +1,64 @@
+{
+  "entries": [
+    {
+      "id": "dcc91b36-6daf-412c-b053-563885107f77",
+      "timestamp": "2026-07-01T11:36:21.402309+00:00",
+      "content": "User's name is Rafael",
+      "metadata": {
+        "type": "knowledge",
+        "confidence": 0.8,
+        "category": "extracted"
+      }
+    },
+    {
+      "id": "3e351595-02bb-4245-a527-f88501de6cc0",
+      "timestamp": "2026-07-01T11:36:21.598184+00:00",
+      "content": "User's favorite color is blue",
+      "metadata": {
+        "type": "knowledge",
+        "confidence": 0.8,
+        "category": "extracted"
+      }
+    },
+    {
+      "id": "d1c44bb9-f166-41f2-bdce-7f3a85e48136",
+      "timestamp": "2026-07-01T11:36:21.820716+00:00",
+      "content": "User lives in Monterrey, Mexico.",
+      "metadata": {
+        "type": "knowledge",
+        "confidence": 0.8,
+        "category": "extracted"
+      }
+    },
+    {
+      "id": "9802f265-fe86-4c54-b1c8-e1fba6ed4b5e",
+      "timestamp": "2026-07-01T11:38:02.303928+00:00",
+      "content": "User's favorite food is pizza",
+      "metadata": {
+        "type": "knowledge",
+        "confidence": 0.8,
+        "category": "extracted"
+      }
+    },
+    {
+      "id": "564d5fc0-fb27-406e-b024-a38017ea7e98",
+      "timestamp": "2026-07-01T11:38:28.030141+00:00",
+      "content": "User's favorite kind of animal is the dog",
+      "metadata": {
+        "type": "knowledge",
+        "confidence": 0.8,
+        "category": "extracted"
+      }
+    },
+    {
+      "id": "4ccbda3f-4255-45a2-b741-8263ff20c249",
+      "timestamp": "2026-07-01T11:38:48.665343+00:00",
+      "content": "User has a Cocker Spaniel named dog",
+      "metadata": {
+        "type": "knowledge",
+        "confidence": 0.8,
+        "category": "extracted"
+      }
+    }
+  ]
+}

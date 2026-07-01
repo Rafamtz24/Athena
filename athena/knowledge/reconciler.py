@@ -32,7 +32,7 @@ class MemoryReconciler:
     def __init__(self, llm_provider):
         self.llm_provider = llm_provider
 
-    async def reconcile(self, conflicts: list[dict], semantic_memory: SemanticMemory) -> dict:
+    def reconcile(self, conflicts: list[dict], semantic_memory: SemanticMemory) -> dict:
         """
         Reconcile all pending conflicts using the LLM.
 
@@ -51,7 +51,7 @@ class MemoryReconciler:
         results = {'processed': 0, 'replaced': 0, 'kept': 0, 'rejected': 0}
 
         for conflict in conflicts:
-            decision = await self._resolve(conflict, semantic_memory)
+            decision = self._resolve(conflict, semantic_memory)
             results['processed'] += 1
             if decision == 'REPLACE':
                 results['replaced'] += 1
@@ -62,7 +62,7 @@ class MemoryReconciler:
 
         return results
 
-    async def _resolve(self, conflict: dict, semantic_memory: SemanticMemory) -> str:
+    def _resolve(self, conflict: dict, semantic_memory: SemanticMemory) -> str:
         """
         Resolve a single conflict using the LLM.
 
@@ -88,7 +88,7 @@ class MemoryReconciler:
             "Respond with exactly one word: REPLACE, KEEP, or REJECT."
         )
 
-        response = await self.llm_provider.generate(prompt)
+        response = self.llm_provider.generate(prompt)
         decision = response.strip().upper()
 
         # Normalize response to expected outcome
