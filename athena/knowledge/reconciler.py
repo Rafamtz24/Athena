@@ -71,6 +71,9 @@ class MemoryReconciler:
             KEEP    - Keep existing entry, discard new candidate
             REJECT  - Reject new candidate (same as KEEP)
 
+        If the provider fails, returns 'REJECT' as a safe default
+        (keeps existing memory, discards the new candidate).
+
         Returns:
             'REPLACE', 'KEEP', or 'REJECT'
         """
@@ -88,7 +91,12 @@ class MemoryReconciler:
             "Respond with exactly one word: REPLACE, KEEP, or REJECT."
         )
 
-        response = self.llm_provider.generate(prompt)
+        try:
+            response = self.llm_provider.generate(prompt)
+        except Exception:
+            # Provider failed — safe default: reject new candidate, keep existing memory
+            return 'REJECT'
+
         decision = response.strip().upper()
 
         # Normalize response to expected outcome

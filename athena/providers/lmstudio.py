@@ -29,25 +29,30 @@ class LMStudioProvider:
             prompt: The input prompt string.
 
         Returns:
-            The LLM response text or error message.
+            The LLM response text.
+
+        Raises:
+            RuntimeError: If the LM Studio provider is unavailable or returns an error.
         """
+        url = f"{self.base_url}/v1/chat/completions"
+        payload = {
+            "model": get_settings().provider.model,
+            "messages": [
+                {
+                    "role": "user",
+                    "content": prompt
+                }
+            ],
+            "temperature": get_settings().provider.temperature,
+            "stream": False
+        }
+        response = requests.post(url, json=payload, timeout=60)
+        response.raise_for_status()
+        data = response.json()
         try:
-            url = f"{self.base_url}/v1/chat/completions"
-            payload = {
-                "model": get_settings().provider.model,
-                "messages": [
-                    {
-                        "role": "user",
-                        "content": prompt
-                    }
-                ],
-                "temperature": get_settings().provider.temperature,
-                "stream": False
-            }
-            response = requests.post(url, json=payload)
-            return response.json()["choices"][0]["message"]["content"]
-        except Exception as e:
-            return f"LM Studio Error: {e}"
+            return data["choices"][0]["message"]["content"]
+        except (KeyError, IndexError) as e:
+            raise RuntimeError(f"LM Studio returned unexpected response format: {data}") from e
 
     def call(self, prompt: str) -> str:
         """Alias for generate() to match KnowledgeManager expectations."""

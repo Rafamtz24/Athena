@@ -156,12 +156,19 @@ class KnowledgeManager:
         
         The parser enforces strict rejection rules to ensure only valid atomic facts
         become KnowledgeCandidate objects.
+        
+        If the provider fails (e.g., unavailable, network error), returns an empty list
+        without corrupting Semantic Memory. Learning is skipped gracefully.
         """
         if self.provider is None:
             return []
         
-        prompt = self._build_extraction_prompt(conversation)
-        response = self.provider.call(prompt)
+        try:
+            prompt = self._build_extraction_prompt(conversation)
+            response = self.provider.call(prompt)
+        except Exception:
+            # Provider failed — skip learning, do not corrupt memory
+            return []
         
         # Parse response into candidate facts following the output contract.
         # Expected format: one fact per line, or "NONE" if no facts.
