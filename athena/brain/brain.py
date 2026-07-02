@@ -37,10 +37,10 @@ class AthenaBrain:
     """
 
     def __init__(self) -> None:
-        from athena.providers.lmstudio import LMStudioProvider
+        from athena.providers import ProviderFactory
 
         self.debug_manager = DebugManager()
-        self.provider = LMStudioProvider()
+        self.provider = ProviderFactory.create()
         self.memory_manager = MemoryManager()
         self.knowledge_manager = KnowledgeManager(
             working_memory=self.memory_manager.working_memory,

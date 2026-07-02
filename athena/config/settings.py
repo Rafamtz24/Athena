@@ -13,10 +13,14 @@ from pathlib import Path
 class ProviderSettings:
     """Settings for the LLM provider."""
 
-    provider: str = "default"
+    provider: str = "llamacpp"
     base_url: str = "http://127.0.0.1:1234"
     model: str = "qwen2.5-7b-instruct"
     temperature: float = 0.7
+
+    # Local GGUF model configuration
+    model_directory: str = "models"
+    reasoning_model: str = "qwen2.5-7b-instruct-q4_k_m.gguf"
 
 
 @dataclass(frozen=False)
@@ -51,6 +55,18 @@ class PromptSettings:
 
 
 @dataclass(frozen=False)
+class PerformanceSettings:
+    """Settings for inference performance tuning."""
+
+    # Performance mode:
+    #   "auto"     – automatically configure for best balance (default)
+    #   "balanced" – same as auto (future: more conservative)
+    #   "maximum"  – prioritise throughput / context size (future)
+    #   "cpu_only" – force CPU inference, no GPU offloading (future)
+    performance_mode: str = "auto"
+
+
+@dataclass(frozen=False)
 class AppSettings:
     """
     Centralized application settings for Athena AI platform.
@@ -60,6 +76,7 @@ class AppSettings:
         version: Application version string.
         debug: Enable debug mode (more verbose logging, auto-reload).
         provider: LLM provider configuration.
+        performance: Inference performance configuration.
         storage: Persistent storage path configuration.
         retrieval: Semantic memory retrieval configuration.
         learning: Learning pipeline configuration.
@@ -70,6 +87,7 @@ class AppSettings:
     version: str = "0.2.0"
     debug: bool = False
     provider: ProviderSettings = field(default_factory=ProviderSettings)
+    performance: PerformanceSettings = field(default_factory=PerformanceSettings)
     storage: StorageSettings = field(default_factory=StorageSettings)
     retrieval: RetrievalSettings = field(default_factory=RetrievalSettings)
     learning: LearningSettings = field(default_factory=LearningSettings)
