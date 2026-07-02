@@ -9,6 +9,9 @@ Classifies knowledge candidates as:
 
 This is the foundation for Capability 2: Memory Reconciliation.
 It does NOT resolve conflicts; it only detects and records them.
+
+Quality gates are deterministic (no LLM calls). The validator is the primary
+quality gate for the Learning Pipeline (Extraction -> Validation).
 """
 
 from typing import List, Optional, Tuple
@@ -32,11 +35,91 @@ class KnowledgeValidator:
     _PLACEHOLDER_VALUES = frozenset({
         'x', 'unknown', 'unspecified', 'n/a', 'null', 'none',
         'someone', 'something', 'somebody', 'somewhere',
+        'nobody', 'nothing', 'nowhere',
+    })
+
+    # Expanded multi-word placeholder phrases that indicate missing/empty values
+    _PLACEHOLDER_PHRASES = frozenset({
+        'none specified', 'not provided', 'no value', 'value unknown',
+        'no name', 'no answer', 'no info', 'no information',
+        'nothing specified', 'nothing provided',
+        'missing', 'empty', 'blank', 'unresolved', 'to be determined',
     })
 
     # Pronouns that indicate unresolved references when used as a value
     _PRONOUN_VALUES = frozenset({
         'her', 'him', 'it', 'they', 'she', 'he', 'them', 'its', 'his',
+    })
+
+    # Imperative command prefixes — statements that instruct the assistant to do
+    # something are never durable user knowledge
+    _IMPERATIVE_PREFIXES = frozenset({
+        'respond with', 'respond', 'say', 'repeat', 'write', 'translate',
+        'count', 'tell me', 'print', 'open', 'create', 'generate',
+        'list', 'show', 'give', 'provide', 'calculate', 'solve',
+        'find', 'search', 'look up', 'call', 'run', 'execute',
+        'send', 'read', 'play', 'start', 'stop', 'delete',
+    })
+
+    # Patterns that describe the conversation itself rather than durable user facts
+    _CONVERSATIONAL_PATTERNS = frozenset({
+        'user says', 'user responds', 'user asks', 'user writes',
+        'user requested', 'user greeted', 'user told', 'user said',
+        'user replied', 'user mentioned', 'user answered',
+        'user stated', 'user declared', 'user exclaimed',
+        'user typed', 'user input', 'user entered',
+        'user gave the', 'user provided the',
+        'user responded with', 'user asks about', 'user asked about',
+        'user says:', 'user responds:', 'user asks:', 'user writes:',
+        'user said:', 'user replied:', 'user mentioned:',
+    })
+
+    # Short phrases that indicate the user is testing the assistant
+    _TESTING_PHRASES = frozenset({
+        'testing', 'just testing', 'test message', 'test input',
+        'repeat after me', 'only answer', 'answer with',
+        'nothing else', 'output only', 'output exactly',
+        'say exactly', 'say nothing else', 'just output',
+        'respond exactly', 'reply exactly',
+    })
+
+    # Last-word endings that indicate an incomplete fact:
+    # the statement trails off without providing the actual value.
+    # These are linking verbs, prepositions, and relational words that
+    # grammatically require a complement to form a complete fact.
+    _INCOMPLETE_LAST_WORDS = frozenset({
+        # Linking verbs without complement
+        'is', 'are', 'was', 'were', 'be', 'been', 'being',
+        # Possession without object
+        'has', 'have', 'had', 'having',
+        # Prepositions requiring an object
+        'in', 'at', 'on', 'for', 'with', 'as', 'about', 'from', 'to',
+        'by', 'of', 'into', 'onto', 'upon', 'within', 'without',
+        # Relational verbs without complement
+        'named', 'called', 'known', 'referred', 'considered',
+        # Action verbs without object
+        'studies', 'studied', 'studying',
+        'works', 'worked', 'working',
+        'lives', 'lived', 'living',
+        'likes', 'liked', 'loving', 'loves',
+        'prefers', 'preferred', 'preferring',
+        'enjoys', 'enjoyed', 'enjoying',
+        'hates', 'hated', 'hating',
+        # Communication verbs (describe conversation acts)
+        'says', 'said', 'saying',
+        'responds', 'responded', 'responding',
+        'asks', 'asked', 'asking',
+        'replies', 'replied', 'replying',
+        'writes', 'wrote', 'writing',
+    })
+
+    # Common conversational tokens that should never be stored as facts
+    # when they appear as the entire statement (isolated user echo)
+    _ECHO_TOKENS = frozenset({
+        'hello', 'world', 'ok', 'okay', 'hi', 'hey', 'yes', 'no',
+        'testing', 'test', 'thanks', 'thank you', 'thanks!', 'bye',
+        'goodbye', 'goodnight', 'good morning', 'good afternoon',
+        'lol', 'lmao', 'haha', 'hmm', 'huh', 'ah', 'oh', 'um', 'uh',
     })
 
     def __init__(self, semantic_memory: SemanticMemory) -> None:
@@ -45,9 +128,20 @@ class KnowledgeValidator:
 
     @staticmethod
     def _is_low_quality(statement: str) -> bool:
-        """Deterministically detect placeholder, incomplete, or unresolved values.
+        """Deterministically detect ANY knowledge that should NOT be stored.
+
+        Quality gates (checked in order):
+          1. Empty / blank
+          2. Imperative commands (e.g. "Respond with Hello")
+          3. Conversational behavior (e.g. "User says Hello")
+          4. Testing interactions (e.g. "repeat after me")
+          5. Echoed user text (single-word tokens)
+          6. Placeholder values / phrases
+          7. Incomplete facts (trailing verb or preposition)
+          8. Vague / unresolved values
 
         No LLM calls. Pure string/pattern matching.
+        Returns True if the statement is LOW QUALITY and should be REJECTED.
         """
         text = statement.strip().lower()
         if not text:
@@ -57,28 +151,109 @@ class KnowledgeValidator:
         if not words:
             return True
 
-        # -- Check the last word (most common position for the knowledge value) --
+        # ──────────────────────────────────────────────────
+        # GATE 1 — Imperative commands
+        # Statements that command the assistant to do something
+        # are never durable user knowledge.
+        # ──────────────────────────────────────────────────
+        first_two = ' '.join(words[:2]) if len(words) >= 2 else words[0]
+        if first_two in KnowledgeValidator._IMPERATIVE_PREFIXES:
+            return True
+        if words[0] in KnowledgeValidator._IMPERATIVE_PREFIXES:
+            return True
+
+        # ──────────────────────────────────────────────────
+        # GATE 2 — Conversational behavior
+        # Statements describing the conversation, not the user.
+        # e.g. "User says Hello", "User responds OK"
+        # ──────────────────────────────────────────────────
+        for pattern in KnowledgeValidator._CONVERSATIONAL_PATTERNS:
+            if pattern in text:
+                return True
+
+        # ──────────────────────────────────────────────────
+        # GATE 3 — Testing interactions
+        # Short test phrases that should never create memory.
+        # ──────────────────────────────────────────────────
+        if text in KnowledgeValidator._TESTING_PHRASES:
+            return True
+        # Also check if the statement contains a testing phrase as its core
+        # (e.g. "respond with" embedded in a longer utterance)
+        for phrase in KnowledgeValidator._TESTING_PHRASES:
+            if phrase in text:
+                # Only reject if the testing phrase is the main content,
+                # not part of a valid fact description
+                if len(text) < 20:
+                    return True
+
+        # ──────────────────────────────────────────────────
+        # GATE 4 — Echoed user text
+        # Single words or short tokens that are just the user's
+        # conversational text, not facts about the user.
+        # ──────────────────────────────────────────────────
+        if len(words) == 1 and words[0] in KnowledgeValidator._ECHO_TOKENS:
+            return True
+
+        # ──────────────────────────────────────────────────
+        # GATE 5 — Placeholder values in final position
+        # The last word is most commonly where the knowledge value sits.
+        # ──────────────────────────────────────────────────
         last_word = words[-1]
         if last_word in KnowledgeValidator._PLACEHOLDER_VALUES | KnowledgeValidator._PRONOUN_VALUES:
             return True
 
-        # -- Check for any occurrence of "something", "someone", "somebody", "somewhere" --
-        # These are never valid values in extracted knowledge
-        for w in words:
-            if w in {'something', 'someone', 'somebody', 'somewhere'}:
+        # ──────────────────────────────────────────────────
+        # GATE 6 — Multi-word placeholder phrases
+        # ──────────────────────────────────────────────────
+        for phrase in KnowledgeValidator._PLACEHOLDER_PHRASES:
+            if phrase in text:
                 return True
 
-        # -- Check for standalone "x" as a word (not part of a valid name like "Xena") --
+        # ──────────────────────────────────────────────────
+        # GATE 7 — Vague/unresolved value words anywhere in text
+        # ──────────────────────────────────────────────────
+        for w in words:
+            if w in {'something', 'someone', 'somebody', 'somewhere',
+                      'anything', 'anyone', 'anybody', 'anywhere',
+                      'everything', 'everyone', 'everybody', 'everywhere'}:
+                return True
+
+        # ──────────────────────────────────────────────────
+        # GATE 8 — Standalone "x" as a word
+        # ──────────────────────────────────────────────────
         if ' x ' in f' {text} ':
             return True
 
-        # -- Check for "unspecified" or "n/a" appearing anywhere --
+        # ──────────────────────────────────────────────────
+        # GATE 9 — "unspecified" or "n/a" appearing anywhere
+        # ──────────────────────────────────────────────────
         if 'unspecified' in words or 'n/a' in words:
             return True
 
-        # -- Check for patterns ending with "a place" or "a person" --
-        # e.g., "User lives in a place", "User is a person"
+        # ──────────────────────────────────────────────────
+        # GATE 10 — Patterns ending with placeholder phrasing
+        # e.g. "User lives in a place", "User is a person"
+        # ──────────────────────────────────────────────────
         if text.endswith(' a place') or text.endswith(' a person'):
+            return True
+
+        # ──────────────────────────────────────────────────
+        # GATE 11 — Incomplete facts (trailing verb/preposition)
+        # When the last word indicates more information should follow
+        # (linking verb, preposition, or relational word without complement).
+        # e.g. "User lives in" → missing value after "in"
+        # e.g. "User's name is" → missing value after "is"
+        # e.g. "User studies" → missing value after "studies"
+        # ──────────────────────────────────────────────────
+        if last_word in KnowledgeValidator._INCOMPLETE_LAST_WORDS:
+            return True
+
+        # ──────────────────────────────────────────────────
+        # GATE 12 — Statements that are just single-word or
+        # very short tokens without a "User" subject prefix.
+        # These are never valid semantic facts.
+        # ──────────────────────────────────────────────────
+        if len(words) <= 2 and not text.startswith('user'):
             return True
 
         return False
