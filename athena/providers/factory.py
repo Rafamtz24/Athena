@@ -1,0 +1,102 @@
+"""
+Provider Factory
+
+Central factory for creating provider instances.
+The Brain must never instantiate providers directly.
+
+Changing only the `provider` setting in settings.py must be sufficient
+to switch inference backends.
+
+Future providers only require modifications inside this factory.
+"""
+
+from athena.config.settings import get_settings
+
+
+class ProviderFactory:
+    """
+    Single location responsible for creating providers.
+
+    Usage:
+        provider = ProviderFactory.create()
+
+    The factory reads the configured provider name from settings
+    and returns the appropriate provider instance.
+
+    Supported providers:
+        - "lmstudio"  -> LMStudioProvider
+        - "llamacpp"  -> LlamaCppProvider
+        - "ollama"    -> OllamaProvider (future)
+        - "openrouter" -> OpenRouterProvider (future)
+
+    To switch providers, change only:
+        settings.provider.provider = "llamacpp"
+        # or
+        settings.provider.provider = "lmstudio"
+
+    No Brain changes are required.
+    """
+
+    @staticmethod
+    def create():
+        """
+        Create and return a provider instance based on the configured provider name.
+
+        Returns:
+            A provider instance implementing generate(prompt) and call(prompt).
+
+        Raises:
+            ValueError: If the configured provider is unknown or unsupported.
+        """
+        provider_name = get_settings().provider.provider
+
+        if provider_name == "lmstudio":
+            from athena.providers.lmstudio import LMStudioProvider
+
+            return LMStudioProvider()
+
+        elif provider_name == "llamacpp":
+            from athena.hardware import HardwareDetector
+            from athena.config.inference import AutoConfigurator, InferenceConfiguration
+            from athena.providers.llamacpp import LlamaCppProvider
+
+            # Auto-detect hardware and compute optimal inference config
+            hardware = HardwareDetector().detect()
+            config = AutoConfigurator().configure(hardware)
+
+            _print_startup_banner(hardware, config)
+
+            return LlamaCppProvider(inference_config=config)
+
+        else:
+            raise ValueError(
+                f"Unknown provider: '{provider_name}'. "
+                f"Supported providers: lmstudio, llamacpp, ollama, openrouter"
+            )
+
+
+def _print_startup_banner(
+    hardware: "HardwareInfo",
+    config: "InferenceConfiguration",
+) -> None:
+    """Print the hardware detection and inference configuration banner."""
+    print("\n" + "=" * 50)
+    print("Hardware Detected")
+    print("=" * 50)
+    print(f"  CPU:  {hardware.cpu.model}")
+    print(f"        {hardware.cpu.physical_cores} physical cores, "
+          f"{hardware.cpu.logical_threads} logical threads")
+    print(f"  GPU:  {hardware.gpu.vendor} {hardware.gpu.model}")
+    if hardware.gpu.vram_gb is not None:
+        print(f"  VRAM: {hardware.gpu.vram_gb} GB")
+    print(f"  RAM:  {hardware.ram.total_gb} GB")
+    print()
+    print("=" * 50)
+    print("Inference Configuration")
+    print("=" * 50)
+    print(f"  Backend:    {config.backend}")
+    print(f"  GPU Layers: {config.gpu_layers}")
+    print(f"  Threads:    {config.n_threads}")
+    print(f"  Batch:      {config.n_batch}")
+    print(f"  Context:    {config.n_ctx}")
+    print()

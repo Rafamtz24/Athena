@@ -9,3 +9,4 @@ venv/
 .mypy_cache/
 .vscode/
 .idea/
+models/*.gguf

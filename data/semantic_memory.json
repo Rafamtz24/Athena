@@ -9,6 +9,56 @@
         "confidence": 0.8,
         "category": "extracted"
       }
+    },
+    {
+      "id": "6af6a91c-c5b0-463b-aa12-1fe58e4f0024",
+      "timestamp": "2026-07-02T00:55:47.037739+00:00",
+      "content": "User responds with exactly the word OK and nothing else",
+      "metadata": {
+        "type": "knowledge",
+        "confidence": 0.8,
+        "category": "extracted"
+      }
+    },
+    {
+      "id": "9d587691-4787-4797-975a-a9fbc7c9be40",
+      "timestamp": "2026-07-02T00:56:43.732046+00:00",
+      "content": "User says: Hello",
+      "metadata": {
+        "type": "knowledge",
+        "confidence": 0.8,
+        "category": "extracted"
+      }
+    },
+    {
+      "id": "b8c6a2f1-5a91-40e2-92ff-a4106c9aa9e1",
+      "timestamp": "2026-07-02T00:56:43.733484+00:00",
+      "content": "User says: World",
+      "metadata": {
+        "type": "knowledge",
+        "confidence": 0.8,
+        "category": "extracted"
+      }
+    },
+    {
+      "id": "13cd15bd-582a-4301-b73d-98603a000c71",
+      "timestamp": "2026-07-02T00:58:35.753694+00:00",
+      "content": "User lives in none specified",
+      "metadata": {
+        "type": "knowledge",
+        "confidence": 0.8,
+        "category": "extracted"
+      }
+    },
+    {
+      "id": "ef718793-3174-4f91-9f0e-1436ef115007",
+      "timestamp": "2026-07-02T02:54:33.920930+00:00",
+      "content": "User likes testing AI",
+      "metadata": {
+        "type": "knowledge",
+        "confidence": 0.8,
+        "category": "extracted"
+      }
     }
   ]
 }
