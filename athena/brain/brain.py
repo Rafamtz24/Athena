@@ -148,6 +148,9 @@ class AthenaBrain:
         Creates a Thought object, passes it through ThoughtPipeline,
         and returns the response from the thought.
 
+        Detects native tool commands (/system, etc.) and initializes
+        ToolContext on the thought for pipeline processing.
+
         After each interaction:
         1. Appends turn to chat_history.json (permanent transcript)
         2. Appends turn to working_memory.json (active context)
@@ -158,6 +161,18 @@ class AthenaBrain:
         
         # Copy current conversation history into the thought before processing
         thought.history = list(self.history)
+
+        # ── Detect native tool commands ──
+        stripped = message.strip()
+        if stripped.lower().startswith("/system"):
+            from athena.tools.models import ToolContext
+            # Parse prompt after /system
+            prompt = stripped[len("/system"):].strip()
+            thought.tool_context = ToolContext(
+                tool_name="system",
+                prompt=prompt,
+                metadata={"raw_input": stripped},
+            )
 
         await self.pipeline.process(thought)
         response = thought.get_response()

@@ -51,65 +51,101 @@ class KnowledgeManager:
             return self.working_memory.get_candidates()
         return []
 
-    def _build_extraction_prompt(self, conversation: str) -> str:
+    def _build_extraction_prompt(self, conversation: str, tool_context_content: str = "") -> str:
         """Build extraction prompt for knowledge extraction.
         
         The prompt enforces a strict output contract so the LLM returns
         only durable knowledge explicitly stated in the conversation.
         No concrete examples are provided to prevent hallucination.
+        
+        When tool_context_content is provided, the extractor MAY learn stable
+        long-term hardware facts from the System Snapshot, but MUST NOT learn
+        transient runtime values.
         """
-        return (
-            "You are a knowledge extractor for a personal assistant system.\n"
-            "Your job is to extract durable knowledge from a completed conversation.\n\n"
-            "STRICT RULES (follow all without exception):\n"
-            "1. Extract ONLY knowledge that is EXPLICITLY stated in the conversation.\n"
-            "2. NEVER infer, deduce, or guess information.\n"
-            "3. NEVER use prior knowledge or outside information.\n"
-            "4. NEVER use information from system prompts or instructions.\n"
-            "5. NEVER invent facts, even if they seem plausible.\n"
-            "6. If the conversation contains no durable knowledge, return exactly: NONE\n\n"
-            "WHAT TO EXTRACT:\n"
-            "- Explicit user preferences, identity, location, habits\n"
-            "- Explicit project knowledge, constraints, rules stated in the conversation\n"
-            "- Explicit long-term instructions given during the conversation\n"
-            "- Any fact that was explicitly stated and should persist across sessions\n\n"
-            "WHAT TO REJECT:\n"
-            "- Information not explicitly stated in the conversation\n"
-            "- Inferences or assumptions\n"
-            "- General knowledge or common facts\n"
-            "- Transient information (one-time explanations, temporary context)\n"
-            "- Assistant responses that are not persistent instructions\n\n"
-            "OUTPUT FORMAT (follow exactly):\n"
-            "- Return ONE atomic fact per line.\n"
-            "- Each fact must be self-contained and unambiguous.\n"
-            "- Each fact must represent exactly ONE piece of knowledge.\n"
-            "- Plain text only.\n"
-            "- No bullets, numbering, markdown, headings, or code blocks.\n"
-            "- No explanations, examples, or meta commentary.\n"
-            "- No conversation summaries or greetings.\n"
-            "- Use third person for facts about people or systems.\n"
-            "- Convert second person to third person (e.g., 'you live in X' becomes 'User lives in X').\n"
-            "- If there are NO durable facts, return exactly: NONE\n\n"
-            "KNOWLEDGE NORMALIZATION (CRITICAL - follow exactly):\n"
-            "- Preserve the EXACT semantic relationship from the original statement.\n"
-            "- Convert pronouns faithfully: 'My name is X' -> 'User's name is X'.\n"
-            "- Convert pronouns faithfully: 'My favorite color is X' -> 'User's favorite color is X'.\n"
-            "- Convert pronouns faithfully: 'I live in X' -> 'User lives in X'.\n"
-            "- NEVER change the relationship verb or attribute being stated.\n"
-            "- NEVER replace specific attributes with generic ones (e.g., do NOT convert 'favorite color is blue' to 'likes blue').\n"
-            "- NEVER drop or change the predicate of the original statement.\n"
-            "- The extracted fact must be a direct third-person translation of the original.\n\n"
-            "STRUCTURAL FORMAT EXAMPLES (showing format only, not content to extract):\n"
-            "Valid format: one fact per line, plain text\n"
-            "Invalid format: - bullet point\n"
-            "Invalid format: 1. numbered item\n"
-            "Invalid format: # heading\n"
-            "Invalid format: `code block`\n"
-            "Invalid format: User: label prefix\n"
-            "Invalid format: Assistant: label prefix\n\n"
-            "Conversation:\n"
-            "{conversation}"
-        ).format(conversation=conversation)
+        prompt_parts = [
+            "You are a knowledge extractor for a personal assistant system.\n",
+            "Your job is to extract durable knowledge from a completed conversation.\n\n",
+            "STRICT RULES (follow all without exception):\n",
+            "1. Extract ONLY knowledge that is EXPLICITLY stated in the conversation.\n",
+            "2. NEVER infer, deduce, or guess information.\n",
+            "3. NEVER use prior knowledge or outside information.\n",
+            "4. NEVER use information from system prompts or instructions.\n",
+            "5. NEVER invent facts, even if they seem plausible.\n",
+            "6. If the conversation contains no durable knowledge, return exactly: NONE\n\n",
+            "WHAT TO EXTRACT:\n",
+            "- Explicit user preferences, identity, location, habits\n",
+            "- Explicit project knowledge, constraints, rules stated in the conversation\n",
+            "- Explicit long-term instructions given during the conversation\n",
+            "- Any fact that was explicitly stated and should persist across sessions\n\n",
+            "WHAT TO REJECT:\n",
+            "- Information not explicitly stated in the conversation\n",
+            "- Inferences or assumptions\n",
+            "- General knowledge or common facts\n",
+            "- Transient information (one-time explanations, temporary context)\n",
+            "- Assistant responses that are not persistent instructions\n\n",
+            "OUTPUT FORMAT (follow exactly):\n",
+            "- Return ONE atomic fact per line.\n",
+            "- Each fact must be self-contained and unambiguous.\n",
+            "- Each fact must represent exactly ONE piece of knowledge.\n",
+            "- Plain text only.\n",
+            "- No bullets, numbering, markdown, headings, or code blocks.\n",
+            "- No explanations, examples, or meta commentary.\n",
+            "- No conversation summaries or greetings.\n",
+            "- Use third person for facts about people or systems.\n",
+            "- Convert second person to third person (e.g., 'you live in X' becomes 'User lives in X').\n",
+            "- If there are NO durable facts, return exactly: NONE\n\n",
+            "KNOWLEDGE NORMALIZATION (CRITICAL - follow exactly):\n",
+            "- Preserve the EXACT semantic relationship from the original statement.\n",
+            "- Convert pronouns faithfully: 'My name is X' -> 'User's name is X'.\n",
+            "- Convert pronouns faithfully: 'My favorite color is X' -> 'User's favorite color is X'.\n",
+            "- Convert pronouns faithfully: 'I live in X' -> 'User lives in X'.\n",
+            "- NEVER change the relationship verb or attribute being stated.\n",
+            "- NEVER replace specific attributes with generic ones (e.g., do NOT convert 'favorite color is blue' to 'likes blue').\n",
+            "- NEVER drop or change the predicate of the original statement.\n",
+            "- The extracted fact must be a direct third-person translation of the original.\n\n",
+            "STRUCTURAL FORMAT EXAMPLES (showing format only, not content to extract):\n",
+            "Valid format: one fact per line, plain text\n",
+            "Invalid format: - bullet point\n",
+            "Invalid format: 1. numbered item\n",
+            "Invalid format: # heading\n",
+            "Invalid format: `code block`\n",
+            "Invalid format: User: label prefix\n",
+            "Invalid format: Assistant: label prefix\n\n",
+        ]
+        
+        # ── Tool Context extraction rules ──
+        if tool_context_content:
+            prompt_parts.extend([
+                "TOOL CONTEXT (System Snapshot) EXTRACTION RULES:\n",
+                "The System Snapshot below contains information about the user's computer.\n",
+                "You MAY extract stable, long-term hardware facts such as:\n",
+                "- CPU model and core count\n",
+                "- GPU model and VRAM capacity\n",
+                "- Total RAM capacity\n",
+                "- Operating system name and version\n",
+                "- Drive types (SSD/HDD) and capacities\n",
+                "- Monitor resolutions and refresh rates\n",
+                "- Motherboard model and BIOS version\n\n",
+                "You MUST NEVER extract transient runtime values such as:\n",
+                "- CPU usage percentage\n",
+                "- GPU usage percentage\n",
+                "- Current clock speeds\n",
+                "- Current free disk space\n",
+                "- Current VRAM usage\n",
+                "- Network throughput\n",
+                "- System uptime\n",
+                "- Battery percentage\n",
+                "- Any other live metric that changes between reboots or system checks\n\n",
+                "Transient values are temporary observations and MUST NOT become semantic memory.\n",
+                "Only static hardware specifications are valid for extraction.\n\n",
+                "System Snapshot:\n",
+                f"{tool_context_content}\n\n",
+            ])
+        
+        prompt_parts.append("Conversation:\n")
+        prompt_parts.append("{conversation}")
+        
+        return "".join(prompt_parts).format(conversation=conversation)
 
     def retrieve(self, query: str) -> Optional[str]:
         """Retrieve knowledge based on query.
@@ -164,11 +200,15 @@ class KnowledgeManager:
         
         return "\n".join(relevant_entries)
 
-    def extract_candidates(self, conversation: str) -> List[Any]:
+    def extract_candidates(self, conversation: str, tool_context_content: str = "") -> List[Any]:
         """Extract knowledge candidates from a conversation using the provider and store in WorkingMemory.
         
         The parser enforces strict rejection rules to ensure only valid atomic facts
         become KnowledgeCandidate objects.
+        
+        When tool_context_content is provided (from a /system command), the extraction
+        prompt includes special rules for learning stable hardware facts while rejecting
+        transient runtime values.
         
         If the provider fails (e.g., unavailable, network error), returns an empty list
         without corrupting Semantic Memory. Learning is skipped gracefully.
@@ -177,7 +217,7 @@ class KnowledgeManager:
             return []
         
         try:
-            prompt = self._build_extraction_prompt(conversation)
+            prompt = self._build_extraction_prompt(conversation, tool_context_content)
             response = self.provider.call(prompt)
         except Exception:
             # Provider failed — skip learning, do not corrupt memory

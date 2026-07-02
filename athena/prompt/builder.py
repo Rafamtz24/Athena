@@ -82,6 +82,23 @@ class PromptBuilder:
             "",
             "(None)",
             "",
+        ])
+
+        # ── Tool Context (optional, injected by native tools like /system) ──
+        tool_context = getattr(thought, 'tool_context', None)
+        if tool_context is not None and tool_context.content:
+            lines.extend([
+                "====================",
+                "",
+                f"System ({tool_context.tool_name})",
+                "",
+                "====================",
+                "",
+                tool_context.content,
+                "",
+            ])
+
+        lines.extend([
             "====================",
             "",
             "User",

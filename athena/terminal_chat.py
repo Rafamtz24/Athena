@@ -20,31 +20,41 @@ from athena.brain.brain import AthenaBrain
 from athena.config.settings import get_settings
 
 
-def _handle_command(user_input: str) -> bool:
-    """Handle terminal commands. Returns True if command was processed."""
+def _handle_command(user_input: str) -> str:
+    """Handle terminal-only commands. Returns 'consumed' if handled,
+    'pass_through' if the command should be processed by the brain,
+    or 'unknown' if not recognized.
+    """
     parts = user_input.strip().split()
     if not parts:
-        return False
+        return "unknown"
 
-    if parts[0].lower() == "/context" and len(parts) >= 2 and parts[1].lower() == "size":
+    command = parts[0].lower()
+
+    # /context size — terminal-only command
+    if command == "/context" and len(parts) >= 2 and parts[1].lower() == "size":
         if len(parts) == 2:
             # Display current value
             print(f"\nConversation context size: {get_settings().prompt.csize}\n")
-            return True
+            return "consumed"
         elif len(parts) == 3:
             # Update csize
             try:
                 new_size = int(parts[2])
                 if new_size < 0:
                     print("\nError: Context size must be a non-negative integer.\n")
-                    return True
+                    return "consumed"
                 get_settings().prompt.csize = new_size
                 print(f"\nConversation context size: {get_settings().prompt.csize}\n")
             except ValueError:
                 print("\nError: Context size must be a valid integer.\n")
-            return True
+            return "consumed"
 
-    return False
+    # /system — processed by AthenaBrain (generates tool context)
+    if command == "/system":
+        return "pass_through"
+
+    return "unknown"
 
 
 def main() -> None:
@@ -64,12 +74,19 @@ def main() -> None:
         if stripped.lower() in ("exit", "quit"):
             break
 
-        # Handle commands
+        # Handle terminal commands
         if stripped.startswith("/"):
-            _handle_command(stripped)
-            continue
+            result = _handle_command(stripped)
+            if result == "consumed":
+                continue
+            elif result == "pass_through":
+                # Pass through to AthenaBrain for processing
+                pass
+            else:
+                # Unknown command — still pass to brain for potential LLM handling
+                pass
 
-        response = asyncio.run(brain.process(user_input))
+        response = asyncio.run(brain.process(stripped))
         print(f"\n{response}\n")
 
 

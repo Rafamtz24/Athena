@@ -170,7 +170,11 @@ class ThoughtPipeline:
         bus.publish(event)
 
     def _extract_candidates(self, thought: Thought) -> None:
-        """Stage 3a: Extract knowledge candidates from the completed conversation."""
+        """Stage 3a: Extract knowledge candidates from the completed conversation.
+
+        Passes tool context content (if present) so the extractor can learn
+        stable hardware facts while rejecting transient runtime values.
+        """
         if self.knowledge_manager is not None:
             # Use full conversation context (history + current input + assistant response) for extraction
             # Include history + user input + assistant response so extractor can learn from the complete interaction
@@ -179,7 +183,14 @@ class ThoughtPipeline:
             if thought.response:
                 parts.append(f"Assistant: {thought.response}")
             conversation = "\n".join(parts) if parts else thought.user_input
-            self.knowledge_manager.extract_candidates(conversation)
+
+            # Get tool context content if present
+            tool_context_content = ""
+            tool_context = getattr(thought, 'tool_context', None)
+            if tool_context is not None and tool_context.content:
+                tool_context_content = tool_context.content
+
+            self.knowledge_manager.extract_candidates(conversation, tool_context_content)
         
         thought.metadata["stage"] = "candidates_extracted"
         bus = get_event_bus()
@@ -216,13 +227,60 @@ class ThoughtPipeline:
         bus.publish(event)
 
     def _prepare_tools(self, thought: Thought) -> None:
-        """Stage 5: Prepare tool requests if needed."""
+        """Stage 5: Generate tool context if a native tool was requested.
+
+        Detects whether the thought has a tool context request (e.g., /system)
+        and generates the appropriate context. The context is stored on the
+        thought as temporary data for the current request only.
+        """
+        tool_context = getattr(thought, 'tool_context', None)
+        if tool_context is not None and tool_context.tool_name == "system" and not tool_context.content:
+            from athena.tools.system_snapshot import generate_system_snapshot
+            from athena.config.settings import get_settings
+
+            # Gather Athena runtime info
+            settings = get_settings()
+            provider_info = {
+                "provider": settings.provider.provider,
+                "reasoning_model": settings.provider.reasoning_model,
+                "backend": getattr(settings.provider, 'backend', "N/A"),
+                "gpu_layers": getattr(settings.provider, 'gpu_layers', "N/A"),
+                "context_size": getattr(settings, 'context_size', "N/A"),
+                "threads": getattr(settings, 'threads', "N/A"),
+                "batch_size": getattr(settings, 'batch_size', "N/A"),
+            }
+
+            # Gather memory info if available
+            memory_info = {}
+            if self.memory_manager is not None:
+                try:
+                    wm_size = len(self.memory_manager.working_memory.retrieve()) if self.memory_manager.working_memory else 0
+                    sm_count = len(self.memory_manager.query_semantic()) if hasattr(self.memory_manager, 'query_semantic') else 0
+                    ch_size = len(getattr(thought, 'history', []))
+                    memory_info = {
+                        "working_memory_size": wm_size,
+                        "semantic_memory_count": sm_count,
+                        "chat_history_size": ch_size,
+                    }
+                except Exception:
+                    pass
+
+            snapshot = generate_system_snapshot(
+                tool_prompt=tool_context.prompt,
+                provider_info=provider_info,
+                memory_info=memory_info,
+            )
+            tool_context.content = snapshot
+
         thought.metadata["stage"] = "tools_prepared"
         bus = get_event_bus()
         event = Event(
             type="ToolsPrepared",
             source="thought_pipeline",
-            payload={"user_input": thought.user_input},
+            payload={
+                "user_input": thought.user_input,
+                "tool_name": tool_context.tool_name if tool_context else None,
+            },
             metadata={"stage": "tools_prepared"},
         )
         bus.publish(event)
