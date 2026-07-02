@@ -1,6 +1,8 @@
 """Knowledge manager placeholder."""
 
 import re
+import sys
+import traceback
 from typing import List, Dict, Any, Optional
 
 from .models import KnowledgeEntry, KnowledgeQuery, KnowledgeResult, KnowledgeCandidate
@@ -220,6 +222,12 @@ class KnowledgeManager:
             prompt = self._build_extraction_prompt(conversation, tool_context_content)
             response = self.provider.call(prompt)
         except Exception:
+            exc_type, exc_value, exc_tb = sys.exc_info()
+            tb_str = "".join(traceback.format_exception(exc_type, exc_value, exc_tb))
+            print(f"\n[EXTRACT] Provider call() threw exception:")
+            print(f"[EXTRACT] Exception type: {exc_type.__name__}")
+            print(f"[EXTRACT] Exception message: {exc_value}")
+            print(f"[EXTRACT] Full traceback:\n{tb_str}")
             # Provider failed — skip learning, do not corrupt memory
             return []
         

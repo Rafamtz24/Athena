@@ -11,6 +11,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Optional
 
+from athena.planner.models import PlannerDecision
 from athena.tools.models import ToolContext
 
 
@@ -35,6 +36,7 @@ class Thought:
         tool_requests: Requests for external tools/services.
         tool_results: Results from executed tools.
         tool_context: Temporary context injected by a native tool (e.g., /system).
+        planner_decision: Decision produced by the Tool Planner.
         response: Final response built by the thought pipeline.
         reflection: Self-evaluation of the processing outcome.
         metadata: Additional processing metadata.
@@ -52,6 +54,7 @@ class Thought:
     tool_requests: list = field(default_factory=list)
     tool_results: list = field(default_factory=list)
     tool_context: Optional[ToolContext] = None
+    planner_decision: Optional[PlannerDecision] = None
     response: Any = None
     reflection: Any = None
     metadata: dict = field(default_factory=dict)

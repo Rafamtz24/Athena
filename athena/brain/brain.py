@@ -6,6 +6,8 @@ and returns responses.
 """
 
 import json
+import sys
+import traceback
 from pathlib import Path
 
 from athena.config.settings import get_settings
@@ -148,8 +150,14 @@ class AthenaBrain:
         Creates a Thought object, passes it through ThoughtPipeline,
         and returns the response from the thought.
 
-        Detects native tool commands (/system, etc.) and initializes
-        ToolContext on the thought for pipeline processing.
+        The Tool Planner (within the pipeline) is responsible for detecting
+        whether a tool (e.g., /system, web search) is needed. The Tool
+        Router is the sole component that executes tools.
+
+        Every request is COMPLETELY INDEPENDENT:
+        - A new Thought is created per request (fresh planner_decision, tool_context)
+        - The pipeline has comprehensive exception isolation
+        - A failure in one request NEVER affects subsequent requests
 
         After each interaction:
         1. Appends turn to chat_history.json (permanent transcript)
@@ -162,23 +170,31 @@ class AthenaBrain:
         # Copy current conversation history into the thought before processing
         thought.history = list(self.history)
 
-        # ── Detect native tool commands ──
-        stripped = message.strip()
-        if stripped.lower().startswith("/system"):
-            from athena.tools.models import ToolContext
-            # Parse prompt after /system
-            prompt = stripped[len("/system"):].strip()
-            thought.tool_context = ToolContext(
-                tool_name="system",
-                prompt=prompt,
-                metadata={"raw_input": stripped},
-            )
+        # Process through the pipeline with full exception isolation
+        try:
+            await self.pipeline.process(thought)
+        except Exception:
+            exc_type, exc_value, exc_tb = sys.exc_info()
+            tb_str = "".join(traceback.format_exception(exc_type, exc_value, exc_tb))
+            print(f"\n[BRAIN TRACE] pipeline.process() threw an unhandled exception:")
+            print(f"[BRAIN TRACE] Exception type: {exc_type.__name__}")
+            print(f"[BRAIN TRACE] Exception message: {exc_value}")
+            print(f"[BRAIN TRACE] Full traceback:\n{tb_str}")
+            # Absolute last-resort guard: if pipeline itself throws an
+            # unhandled exception, ensure we still produce a valid response.
+            if thought.get_response() is None:
+                thought.set_response(
+                    "I'm sorry, I'm currently unable to process your request."
+                )
 
-        await self.pipeline.process(thought)
         response = thought.get_response()
 
         # Store the completed thought in debug manager
         self.debug_manager.set_last_thought(thought)
+
+        # Always perform post-request bookkeeping so state never leaks.
+        # Even if pipeline.process() raised, we still save history and
+        # clear working memory to ensure the NEXT request starts fresh.
 
         # Append to permanent chat history (always, never pruned)
         self._append_to_chat_history(message, response)
@@ -193,5 +209,11 @@ class AthenaBrain:
         # Store in episodic memory
         content = f"User:\n{message}\n\nAssistant:\n{response}"
         self.memory_manager.remember(content)
+
+        # Ensure WorkingMemory is always clean for the next request
+        try:
+            self.memory_manager.clear_working()
+        except Exception:
+            pass
 
         return response

@@ -146,3 +146,12 @@ class SemanticMemory:
             if entry.id == entry_id:
                 return entry
         return None
+
+    def remove(self, entry_id: str) -> bool:
+        """Remove an entry by ID. Returns True if found and removed."""
+        for i, entry in enumerate(self._knowledge):
+            if entry.id == entry_id:
+                self._knowledge.pop(i)
+                self._save()
+                return True
+        return False

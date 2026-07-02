@@ -8,14 +8,34 @@ communication with other subsystems.
 EventBus integration:
     - Each pipeline stage publishes a corresponding event
     - Events allow other modules to observe thought lifecycle without tight coupling
+
+Pipeline stages (in order):
+    1. _initialize()        — Set metadata, publish ThoughtCreated
+    2. _load_memory()       — Load episodic memories (Working Memory)
+    3. _load_knowledge()    — Retrieve Semantic Memory
+    4. _plan_tool()         — Tool Planner: decide if a tool is needed
+    5. _execute_tool()      — Tool Router: execute tool if needed
+    6. _reason()            — Publish ReasoningStarted
+    7. _plan()              — Publish PlanningStarted
+    8. _prepare_tools()     — Verify tool context, publish ToolsPrepared
+    9. CognitiveEngine      — Build prompt, call provider, set response
+    10. _build_response()   — Publish ResponseGenerated
+    11. _extract_candidates() — Extract knowledge candidates
+    12. _validate_knowledge() — Validate and promote to Semantic Memory
+    13. _reflect()          — Self-evaluate outcome
+    14. _finalize()         — Publish ThoughtCompleted
 """
 
+import sys
+import traceback
 from typing import Any, Optional
 
 from athena.events.bus import get_event_bus
 from athena.events.models import Event
 from athena.thought.models import Thought
 from athena.cognition.engine import CognitiveEngine
+from athena.planner.planner import plan as plan_tool
+from athena.tools.router import route as execute_tool
 
 
 class ThoughtPipeline:
@@ -26,26 +46,34 @@ class ThoughtPipeline:
         create(): Factory method to create and initialize a new Thought.
         process(): Run a Thought through all processing stages.
 
-    Each processing stage is implemented as a private method with placeholder
-    implementations for future expansion. Events are published at each stage.
-
     Pipeline Stages:
-        _initialize()      -> publishes ThoughtCreated event
-        _load_memory()     -> publishes MemoryLoaded event
-        _reason()          -> publishes ReasoningStarted event
-        _plan()            -> publishes PlanningCompleted event (partial)
-        _prepare_tools()   -> publishes ToolsPrepared event
-        _build_response()  -> publishes ResponseGenerated event
-        _reflect()         -> publishes ReflectionStarted event
-        _finalize()        -> publishes ThoughtCompleted event
+        1. _initialize()        -> publishes ThoughtCreated
+        2. _load_memory()       -> publishes MemoryLoaded
+        3. _load_knowledge()    -> publishes KnowledgeLoaded
+        4. _plan_tool()         -> publishes ToolPlanned
+        5. _execute_tool()      -> publishes ToolExecuted
+        6. _reason()            -> publishes ReasoningStarted
+        7. _plan()              -> publishes PlanningStarted
+        8. _prepare_tools()     -> publishes ToolsPrepared
+        9. CognitiveEngine      -> PromptBuilder + provider call
+        10. _build_response()   -> publishes ResponseGenerated
+        11. _extract_candidates() -> publishes CandidatesExtracted
+        12. _validate_knowledge() -> validates & promotes to Semantic Memory
+        13. _reflect()          -> publishes ReflectionStarted
+        14. _finalize()         -> publishes ThoughtCompleted
 
     Events published:
         - ThoughtCreated
         - MemoryLoaded
+        - KnowledgeLoaded
+        - ToolPlanned
+        - ToolExecuted
         - ReasoningStarted
         - PlanningStarted
         - ToolsPrepared
         - ResponseGenerated
+        - CandidatesExtracted
+        - KnowledgeValidated
         - ReflectionStarted
         - ThoughtCompleted
     """
@@ -85,28 +113,105 @@ class ThoughtPipeline:
         Events are published at each stage for observability.
         The final response is extracted from the thought after completion.
 
+        EVERY stage is isolated: exceptions from a single stage are caught,
+        logged, and the pipeline continues. This guarantees that a failed
+        tool invocation or provider error NEVER corrupts future requests.
+
         Args:
             thought: The Thought object to process.
 
         Returns:
             The final response string from the thought, or None if not set.
         """
-        # Reasoning Phase: Load memory and knowledge, generate response (semantic memory only)
-        self._initialize(thought)
-        self._load_memory(thought)
-        self._load_knowledge(thought)
-        self._reason(thought)
-        self._plan(thought)
-        self._prepare_tools(thought)
-        engine = CognitiveEngine(self.provider)
-        thought = engine.process(thought)
-        self._build_response(thought)
-        
-        # Learning Phase: Extract, validate knowledge (separate from reasoning)
-        self._extract_candidates(thought)
-        await self._validate_knowledge(thought)
-        self._reflect(thought)
-        self._finalize(thought)
+        try:
+            # Reasoning Phase: Load memory and knowledge, generate response
+            self._initialize(thought)
+            self._load_memory(thought)        # Working Memory
+            self._load_knowledge(thought)     # Semantic Memory
+            self._plan_tool(thought)          # Tool Planner (decides if tool needed)
+            self._execute_tool(thought)       # Tool Router (executes tool if needed)
+            self._reason(thought)
+            self._plan(thought)
+            self._prepare_tools(thought)      # Verify tool context, publish event
+            engine = CognitiveEngine(self.provider)
+            thought = engine.process(thought)
+            self._build_response(thought)
+        except Exception:
+            # Stage-level failure caught — isolate, do not poison future requests
+            exc_type, exc_value, exc_tb = sys.exc_info()
+            tb_str = "".join(traceback.format_exception(exc_type, exc_value, exc_tb))
+            print(f"\n[PIPELINE TRACE] Reasoning phase exception at stage='{thought.metadata.get('stage', 'unknown')}'")
+            print(f"[PIPELINE TRACE] Exception type: {exc_type.__name__}")
+            print(f"[PIPELINE TRACE] Exception message: {exc_value}")
+            print(f"[PIPELINE TRACE] Full traceback:\n{tb_str}")
+            thought.trace["pipeline_error"] = {
+                "stage": thought.metadata.get("stage", "unknown"),
+                "exception_type": exc_type.__name__,
+                "exception_message": str(exc_value),
+                "traceback": tb_str,
+            }
+            if thought.get_response() is None:
+                thought.set_response(
+                    "I'm sorry, I'm currently unable to process your request."
+                )
+
+        # Learning Phase: runs even if reasoning failed,
+        # but is itself isolated so failures don't propagate.
+        try:
+            self._extract_candidates(thought)
+        except Exception:
+            exc_type, exc_value, exc_tb = sys.exc_info()
+            tb_str = "".join(traceback.format_exception(exc_type, exc_value, exc_tb))
+            print(f"\n[PIPELINE TRACE] extract_candidates exception:")
+            print(f"[PIPELINE TRACE] Exception type: {exc_type.__name__}")
+            print(f"[PIPELINE TRACE] Exception message: {exc_value}")
+            print(f"[PIPELINE TRACE] Full traceback:\n{tb_str}")
+            thought.trace["extract_candidates_error"] = {
+                "exception_type": exc_type.__name__,
+                "exception_message": str(exc_value),
+                "traceback": tb_str,
+            }
+
+        try:
+            await self._validate_knowledge(thought)
+        except Exception:
+            exc_type, exc_value, exc_tb = sys.exc_info()
+            tb_str = "".join(traceback.format_exception(exc_type, exc_value, exc_tb))
+            print(f"\n[PIPELINE TRACE] validate_knowledge exception:")
+            print(f"[PIPELINE TRACE] Exception type: {exc_type.__name__}")
+            print(f"[PIPELINE TRACE] Exception message: {exc_value}")
+            print(f"[PIPELINE TRACE] Full traceback:\n{tb_str}")
+            thought.trace["validate_knowledge_error"] = {
+                "exception_type": exc_type.__name__,
+                "exception_message": str(exc_value),
+                "traceback": tb_str,
+            }
+
+        try:
+            self._reflect(thought)
+        except Exception:
+            exc_type, exc_value, exc_tb = sys.exc_info()
+            tb_str = "".join(traceback.format_exception(exc_type, exc_value, exc_tb))
+            print(f"\n[PIPELINE TRACE] reflect exception:")
+            print(f"[PIPELINE TRACE] Full traceback:\n{tb_str}")
+            thought.trace["reflect_error"] = {
+                "exception_type": exc_type.__name__,
+                "exception_message": str(exc_value),
+                "traceback": tb_str,
+            }
+
+        try:
+            self._finalize(thought)
+        except Exception:
+            exc_type, exc_type, exc_tb = sys.exc_info()
+            tb_str = "".join(traceback.format_exception(exc_type, exc_value, exc_tb))
+            print(f"\n[PIPELINE TRACE] finalize exception:")
+            print(f"[PIPELINE TRACE] Full traceback:\n{tb_str}")
+            thought.trace["finalize_error"] = {
+                "exception_type": exc_type.__name__,
+                "exception_message": str(exc_value),
+                "traceback": tb_str,
+            }
 
         return thought.get_response()
 
@@ -169,6 +274,98 @@ class ThoughtPipeline:
         )
         bus.publish(event)
 
+    def _plan_tool(self, thought: Thought) -> None:
+        """Stage 4: Run the Tool Planner to decide if a tool is needed.
+
+        The planner has access to:
+            - thought.user_input (current user input)
+            - thought.history (Working Memory / conversation history)
+            - thought.knowledge (Semantic Memory / retrieved knowledge)
+
+        The planner does NOT have access to Tool Context (it doesn't exist yet).
+        The planner produces a PlannerDecision stored on the thought.
+        """
+        decision = plan_tool(thought)
+        thought.planner_decision = decision
+        thought.trace["planner_decision"] = {
+            "tool": decision.tool,
+            "query": decision.query,
+            "prompt": decision.prompt,
+            "reason": decision.reason,
+        }
+        thought.metadata["planner_decision"] = decision.tool
+
+        thought.metadata["stage"] = "tool_planned"
+        bus = get_event_bus()
+        event = Event(
+            type="ToolPlanned",
+            source="thought_pipeline",
+            payload={
+                "user_input": thought.user_input,
+                "decision_tool": decision.tool,
+                "decision_reason": decision.reason,
+            },
+            metadata={"stage": "tool_planned"},
+        )
+        bus.publish(event)
+
+    def _execute_tool(self, thought: Thought) -> None:
+        """Stage 5: Execute the tool if the planner requested one.
+
+        The Tool Router is the ONLY component responsible for invoking tools.
+        It receives the PlannerDecision and returns a ToolContext (or None).
+        The ToolContext is stored on the thought for prompt injection.
+        """
+        decision = getattr(thought, "planner_decision", None)
+        if decision is None or not decision.requires_execution:
+            thought.metadata["tool_executed"] = False
+            thought.metadata["stage"] = "tool_executed"
+            bus = get_event_bus()
+            event = Event(
+                type="ToolExecuted",
+                source="thought_pipeline",
+                payload={
+                    "user_input": thought.user_input,
+                    "tool": None,
+                    "executed": False,
+                },
+                metadata={"stage": "tool_executed"},
+            )
+            bus.publish(event)
+            return
+
+        # Route and execute the tool
+        tool_context = execute_tool(
+            decision=decision,
+            thought=thought,
+            memory_manager=self.memory_manager,
+            provider=self.provider,
+        )
+
+        if tool_context is not None:
+            thought.tool_context = tool_context
+            thought.metadata["tool_executed"] = True
+            thought.trace["tool_context"] = {
+                "tool_name": tool_context.tool_name,
+                "content_length": len(tool_context.content),
+            }
+        else:
+            thought.metadata["tool_executed"] = False
+
+        thought.metadata["stage"] = "tool_executed"
+        bus = get_event_bus()
+        event = Event(
+            type="ToolExecuted",
+            source="thought_pipeline",
+            payload={
+                "user_input": thought.user_input,
+                "tool": decision.tool,
+                "executed": tool_context is not None,
+            },
+            metadata={"stage": "tool_executed"},
+        )
+        bus.publish(event)
+
     def _extract_candidates(self, thought: Thought) -> None:
         """Stage 3a: Extract knowledge candidates from the completed conversation.
 
@@ -227,50 +424,19 @@ class ThoughtPipeline:
         bus.publish(event)
 
     def _prepare_tools(self, thought: Thought) -> None:
-        """Stage 5: Generate tool context if a native tool was requested.
+        """Stage 8: Verify tool context and publish ToolsPrepared event.
 
-        Detects whether the thought has a tool context request (e.g., /system)
-        and generates the appropriate context. The context is stored on the
-        thought as temporary data for the current request only.
+        Tool Context is generated by the Tool Router (Stage 5).
+        This stage confirms the context is ready for the PromptBuilder
+        and publishes the ToolsPrepared event for observability.
         """
         tool_context = getattr(thought, 'tool_context', None)
-        if tool_context is not None and tool_context.tool_name == "system" and not tool_context.content:
-            from athena.tools.system_snapshot import generate_system_snapshot
-            from athena.config.settings import get_settings
-
-            # Gather Athena runtime info
-            settings = get_settings()
-            provider_info = {
-                "provider": settings.provider.provider,
-                "reasoning_model": settings.provider.reasoning_model,
-                "backend": getattr(settings.provider, 'backend', "N/A"),
-                "gpu_layers": getattr(settings.provider, 'gpu_layers', "N/A"),
-                "context_size": getattr(settings, 'context_size', "N/A"),
-                "threads": getattr(settings, 'threads', "N/A"),
-                "batch_size": getattr(settings, 'batch_size', "N/A"),
+        if tool_context is not None:
+            thought.trace["tool_context_ready"] = {
+                "tool_name": tool_context.tool_name,
+                "has_content": bool(tool_context.content),
+                "content_length": len(tool_context.content) if tool_context.content else 0,
             }
-
-            # Gather memory info if available
-            memory_info = {}
-            if self.memory_manager is not None:
-                try:
-                    wm_size = len(self.memory_manager.working_memory.retrieve()) if self.memory_manager.working_memory else 0
-                    sm_count = len(self.memory_manager.query_semantic()) if hasattr(self.memory_manager, 'query_semantic') else 0
-                    ch_size = len(getattr(thought, 'history', []))
-                    memory_info = {
-                        "working_memory_size": wm_size,
-                        "semantic_memory_count": sm_count,
-                        "chat_history_size": ch_size,
-                    }
-                except Exception:
-                    pass
-
-            snapshot = generate_system_snapshot(
-                tool_prompt=tool_context.prompt,
-                provider_info=provider_info,
-                memory_info=memory_info,
-            )
-            tool_context.content = snapshot
 
         thought.metadata["stage"] = "tools_prepared"
         bus = get_event_bus()
@@ -298,89 +464,83 @@ class ThoughtPipeline:
         bus.publish(event)
 
     async def _validate_knowledge(self, thought: Thought) -> None:
-        """Stage 7: Validate candidate facts and promote verified ones to semantic memory.
-        
-        Uses KnowledgeValidator to classify candidates as:
-        - Low Quality: placeholder/incomplete values (rejected deterministically)
-        - Duplicate: already exists in Semantic Memory (rejected)
-        - New Fact: unique knowledge worth storing (promoted)
-        - Possible Conflict: contradicts existing entry (reconciled via LLM)
-        
-        For possible conflicts, invokes the reconciler to resolve using LLM.
+        """Stage 7: Validate candidate facts and reconcile against Semantic Memory.
+
+        Two-phase process:
+        1. QUALITY GATE (deterministic):
+           - KnowledgeValidator rejects low-quality / placeholder facts
+           - KnowledgeValidator rejects exact normalized duplicates (fast-path)
+        2. RECONCILIATION (LLM-based):
+           - MemoryReconciler compares each remaining candidate against ALL
+             existing Semantic Memory entries in a SINGLE provider call
+           - Determines: duplicate, conflict, or different
+           - Applies deterministic memory modifications
+
+        Provider call count: EXACTLY ONE per candidate that passes validation.
         """
-        from athena.knowledge.validator import KnowledgeValidator
-        from athena.knowledge.reconciler import MemoryReconciler
-        
         if self.memory_manager is not None:
             candidates = self.memory_manager.get_candidates()
-            
-            # Get semantic memory reference for conflict detection
+            if not candidates:
+                thought.metadata["knowledge_validation"] = {"candidates": 0}
+                thought.metadata["stage"] = "knowledge_validated"
+                bus = get_event_bus()
+                event = Event(
+                    type="KnowledgeValidated",
+                    source="thought_pipeline",
+                    payload={"user_input": thought.user_input},
+                    metadata={"stage": "knowledge_validation"},
+                )
+                bus.publish(event)
+                return
+
+            from athena.knowledge.validator import KnowledgeValidator
+            from athena.knowledge.reconciler import MemoryReconciler
+
             semantic_mem = self.memory_manager.semantic_memory
-            
             validator = KnowledgeValidator(semantic_mem)
-            
-            # Track which conflicts correspond to which candidates
-            conflict_to_candidate = {}
-            
-            for idx, candidate in enumerate(candidates):
-                classification, conflict_id = validator.classify(
+
+            # Phase 1: Deterministic quality gating
+            valid_candidates = []
+            validation_counts = {'low_quality': 0, 'duplicate': 0, 'valid': 0}
+
+            for candidate in candidates:
+                classification, _ = validator.classify(
                     candidate.statement,
                     candidate.confidence,
-                    candidate.category
+                    candidate.category,
                 )
-                
-                if classification == 'low_quality':
-                    # Low quality (placeholder/incomplete): discard silently
-                    pass
-                elif classification == 'duplicate':
-                    # Duplicate: skip (do not update Semantic Memory)
-                    pass
-                elif classification == 'new_fact':
-                    # New fact: promote to semantic memory
-                    self.memory_manager.learn(candidate.statement, {
-                        "type": "knowledge",
-                        "confidence": candidate.confidence,
-                        "category": candidate.category
-                    })
-                elif classification == 'possible_conflict':
-                    # Possible conflict: reconcile via LLM
-                    conflict_to_candidate[idx] = (candidate, conflict_id)
-            
-            # Reconcile all possible conflicts using the reconciler
-            if self.provider is not None and conflict_to_candidate:
+                validation_counts[classification] = validation_counts.get(classification, 0) + 1
+
+                if classification == 'valid':
+                    valid_candidates.append(candidate)
+                # low_quality and duplicate are silently discarded
+
+            # Phase 2: LLM-based reconciliation for valid candidates
+            reconciliation_results = None
+
+            if valid_candidates and self.provider is not None:
                 reconciler = MemoryReconciler(self.provider)
-                
-                # Build list of conflict records for reconciliation
-                conflicts = []
-                for idx, (candidate, conflict_id) in conflict_to_candidate.items():
-                    # Find the conflict record from validator.conflicts
-                    for c in validator.get_conflicts():
-                        if c['existing_id'] == conflict_id or c['candidate_statement'] == candidate.statement:
-                            conflicts.append(c)
-                            break
-                
-                # Reconcile all conflicts at once
-                reconciliation_results = reconciler.reconcile(conflicts, semantic_mem)
-                
-                # Store reconciliation results in thought metadata
-                thought.metadata["reconciliation"] = {
-                    "total_conflicts": len(conflicts),
-                    "results": reconciliation_results
+                reconciliation_results = reconciler.reconcile(valid_candidates, semantic_mem)
+            elif valid_candidates and self.provider is None:
+                # No provider available — do NOT modify SM (fail-safe)
+                reconciliation_results = {
+                    'processed': len(valid_candidates),
+                    'duplicates': 0,
+                    'conflicts': 0,
+                    'new_facts': 0,
+                    'errors': len(valid_candidates),
                 }
-            
-            elif conflict_to_candidate:
-                # No provider available - keep existing memory for all conflicts
-                thought.metadata["reconciliation"] = {
-                    "skipped": True,
-                    "reason": "No LLM provider configured"
-                }
-            
-            # Clear candidates after processing (they've been promoted or discarded)
+
+            # Store metadata
+            thought.metadata["knowledge_validation"] = {
+                "candidates": len(candidates),
+                "validation": validation_counts,
+                "reconciliation": reconciliation_results,
+            }
+
+            # Clear candidates after processing
             self.memory_manager.working_memory.clear()
-            
-            # Store detected conflicts in thought metadata for future reconciliation
-            thought.metadata["conflicts"] = validator.get_conflicts()
-        
+
         thought.metadata["stage"] = "knowledge_validated"
         bus = get_event_bus()
         event = Event(

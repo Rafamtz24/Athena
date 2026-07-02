@@ -4,6 +4,9 @@ Provides the CognitiveEngine class, which serves as the entry point
 for future cognitive processing strategies and contexts.
 """
 
+import sys
+import traceback
+
 from athena.logging.logger import logger
 from athena.prompt.builder import PromptBuilder
 
@@ -40,9 +43,17 @@ class CognitiveEngine:
                 thought.set_response(response)
             except Exception as e:
                 # Provider failed — set error trace, provide fallback response
+                exc_type, exc_value, exc_tb = sys.exc_info()
+                tb_str = "".join(traceback.format_exception(exc_type, exc_value, exc_tb))
+                print(f"\n[COGNITIVE ENGINE] Provider generate() threw exception:")
+                print(f"[COGNITIVE ENGINE] Exception type: {exc_type.__name__}")
+                print(f"[COGNITIVE ENGINE] Exception message: {exc_value}")
+                print(f"[COGNITIVE ENGINE] Full traceback:\n{tb_str}")
                 thought.trace["error"] = {
                     "source": "provider",
-                    "message": str(e)
+                    "message": str(e),
+                    "exception_type": exc_type.__name__,
+                    "traceback": tb_str,
                 }
                 thought.set_response("I'm sorry, I'm currently unable to process your request. Please try again later.")
         result = thought
