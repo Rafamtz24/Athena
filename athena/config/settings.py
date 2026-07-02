@@ -48,6 +48,17 @@ class LearningSettings:
 
 
 @dataclass(frozen=False)
+class WebSearchSettings:
+    """Settings for the Web Search tool."""
+
+    enabled: bool = True
+    provider: str = "duckduckgo"
+    max_results: int = 5
+    timeout: int = 10
+    user_agent: str = "Athena"
+
+
+@dataclass(frozen=False)
 class PromptSettings:
     """Settings for prompt construction."""
 
@@ -91,6 +102,7 @@ class AppSettings:
     storage: StorageSettings = field(default_factory=StorageSettings)
     retrieval: RetrievalSettings = field(default_factory=RetrievalSettings)
     learning: LearningSettings = field(default_factory=LearningSettings)
+    web_search: WebSearchSettings = field(default_factory=WebSearchSettings)
     prompt: PromptSettings = field(default_factory=PromptSettings)
 
     def __post_init__(self):

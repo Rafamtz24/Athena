@@ -115,12 +115,42 @@ def _is_personal_hardware_query(user_input: str) -> bool:
     return True
 
 
+def _is_personal_query(user_input: str) -> bool:
+    """Detect if the query is about the user's personal information.
+
+    These queries reference 'my' or 'I' and ask about personal attributes
+    (name, age, preferences, pets, family, etc.) that should be answered
+    from memory, not from web search.
+    """
+    lower = user_input.lower()
+
+    # Must contain a personal reference
+    if not ('my ' in lower or " my" in lower or lower.startswith("my ")):
+        return False
+
+    # If query also contains external info indicators, it's a web search
+    external_patterns = [
+        r'\b(latest|current|recent|new|upcoming|version|release|update)\b',
+        r'\b(bios|driver|firmware|price|cost|buy|review)\b',
+        r'\b(how (much|many|to)|where (to|can|is))\b',
+    ]
+    for pat in external_patterns:
+        if re.search(pat, lower):
+            return False
+
+    return True
+
+
 def _is_web_search_query(user_input: str) -> bool:
     """Detect if user is asking for information likely needing a web search."""
     lower = user_input.lower()
 
     # Pure personal hardware queries (e.g., "what is my GPU") are NOT web searches
     if _is_personal_hardware_query(user_input):
+        return False
+
+    # Pure personal queries (e.g., "what is my dog's name") are NOT web searches
+    if _is_personal_query(user_input):
         return False
 
     # Check explicit web search commands and prefixes
@@ -226,15 +256,37 @@ def plan(thought: Any) -> PlannerDecision:
                     reason="Information available in working memory (conversation history).",
                 )
 
-    # ── Rule 4: Web search query (stub) ──
+    # ── Rule 4: Web search query ──
     # Check BEFORE hardware facts because queries like "latest BIOS version"
     # contain hardware terms but require external information.
     if _is_web_search_query(user_input):
+        # Check if web search is enabled in settings
+        from athena.config.settings import get_settings
+        settings = get_settings()
+        if not settings.web_search.enabled:
+            return PlannerDecision(
+                tool="none",
+                reason="Web search is disabled in settings — skipping web tool.",
+            )
+
         query = _extract_web_query(user_input)
+
+        # Always prefer existing knowledge before requesting web search.
+        # If semantic memory already has relevant information, no tool needed.
+        if _has_semantic_knowledge(thought):
+            knowledge_lower = knowledge_str.lower()
+            query_words = [w.lower() for w in re.findall(r'[a-z]+', query) if len(w) > 3]
+            has_relevant_knowledge = any(w in knowledge_lower for w in query_words) if query_words else False
+            if has_relevant_knowledge:
+                return PlannerDecision(
+                    tool="none",
+                    reason="Relevant information already exists in semantic memory — no web search needed.",
+                )
+
         return PlannerDecision(
             tool="web",
             query=query,
-            reason="Query suggests external information is needed (web search stub).",
+            reason="Query suggests external or current information is needed — web search requested.",
         )
 
     # ── Rule 5: Hardware fact question ──

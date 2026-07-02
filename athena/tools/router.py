@@ -15,6 +15,7 @@ architectural redesign.
 
 from typing import Any, Optional
 
+from athena.logging.logger import logger
 from athena.planner.models import PlannerDecision
 from athena.tools.models import ToolContext
 
@@ -83,22 +84,120 @@ def _execute_system_tool(
 
 
 def _execute_web_tool(decision: PlannerDecision) -> ToolContext:
-    """Execute the Web Search tool (stub implementation).
+    """Execute the Web Search tool.
 
-    The web search engine is not yet implemented. This stub returns a
-    ToolContext indicating that the web tool was requested but is not
-    yet available. The architecture fully supports it.
+    Uses the configured web search provider (default: DuckDuckGo) to
+    perform a live web search. Produces a ToolContext with the results.
+
+    If the search fails (no connection, timeout, empty results, provider
+    error), logs the failure and returns a minimal ToolContext without
+    crashing Athena.
     """
+    from athena.config.settings import get_settings
+    from athena.tools.web_search import get_provider
+
+    settings = get_settings()
+    ws_settings = settings.web_search
+
+    # ── Resolve the provider ──
+    provider_name = ws_settings.provider
+    provider_func = get_provider(provider_name)
+
+    if provider_func is None:
+        logger.warning("Web search provider '%s' not found.", provider_name)
+        return ToolContext(
+            tool_name="web",
+            content="[Web search provider '{provider}' not configured.]".format(
+                provider=provider_name
+            ),
+            prompt=decision.query,
+            metadata={
+                "decision_reason": decision.reason,
+                "query": decision.query,
+                "status": "provider_not_found",
+            },
+        )
+
+    # ── Execute the search ──
+    query = decision.query or ""
+    if not query.strip():
+        return ToolContext(
+            tool_name="web",
+            content="",
+            prompt="",
+            metadata={
+                "decision_reason": "Empty query — no search performed.",
+                "query": "",
+                "status": "empty_query",
+            },
+        )
+
+    results = provider_func(
+        query=query,
+        max_results=ws_settings.max_results,
+        timeout=ws_settings.timeout,
+        user_agent=ws_settings.user_agent,
+    )
+
+    # ── Handle failure ──
+    if results is None:
+        logger.error("Web search failed for query: %s", query)
+        return ToolContext(
+            tool_name="web",
+            content="",
+            prompt=query,
+            metadata={
+                "decision_reason": decision.reason,
+                "query": query,
+                "status": "failed",
+            },
+        )
+
+    # ── Handle empty results ──
+    if not results:
+        return ToolContext(
+            tool_name="web",
+            content="[No results found for query: {query}]".format(query=query),
+            prompt=query,
+            metadata={
+                "decision_reason": decision.reason,
+                "query": query,
+                "status": "empty_results",
+            },
+        )
+
+    # ── Format results ──
+    lines = [
+        "Search Query:",
+        query,
+        "",
+        "Search Results:",
+        "",
+    ]
+    for i, result in enumerate(results, start=1):
+        title = result.get("title", "(No title)").strip()
+        url = result.get("href", "").strip()
+        snippet = result.get("body", "(No snippet)").strip()
+        lines.append("{i}.".format(i=i))
+        lines.append("Title: {title}".format(title=title))
+        lines.append("URL: {url}".format(url=url))
+        lines.append("Snippet: {snippet}".format(snippet=snippet))
+        lines.append("")
+
+    content = "\n".join(lines).rstrip()
+
+    # ── Console notification ──
+    print("Performed web search.")
+
     return ToolContext(
         tool_name="web",
-        content="[Web tool not yet implemented. Query would be: {query}]".format(
-            query=decision.query or "(no query)"
-        ),
-        prompt=decision.query,
+        content=content,
+        prompt=query,
         metadata={
             "decision_reason": decision.reason,
-            "query": decision.query,
-            "status": "stub",
+            "query": query,
+            "result_count": len(results),
+            "status": "success",
         },
     )
 
