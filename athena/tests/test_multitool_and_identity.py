@@ -110,6 +110,49 @@ def test_plan_tools_single_tool_unchanged():
     print("  [OK] Non-compatibility query yields a single decision")
 
 
+def test_live_info_and_contractions_trigger_web():
+    from athena.planner.planner import _is_web_search_query
+    # Live topics + contractions that previously slipped through as "no tool"
+    # (causing the model to fabricate an answer) now trigger a web search.
+    for q in [
+        "whats the weather today in monterrey mexico",
+        "hows the weather in paris",
+        "whats the price of bitcoin",
+        "who won the game last night",
+    ]:
+        assert _is_web_search_query(q), f"Expected web search for {q!r}"
+    print("  [OK] Live-info / contraction queries trigger a web search")
+
+
+def test_personal_queries_do_not_web_search():
+    from athena.planner.planner import _is_web_search_query
+    # Contraction handling must not hijack personal/memory queries.
+    for q in ["whats my name", "what is my dog called", "hello"]:
+        assert not _is_web_search_query(q), f"Did not expect web search for {q!r}"
+    print("  [OK] Personal queries are not sent to web search")
+
+
+def test_live_info_not_suppressed_by_memory_overlap():
+    from athena.planner.planner import plan
+    # A weather query for the user's own city routes to the weather tool even
+    # though the city ("Monterrey") is a stored fact — no memory suppression.
+    t = Thought(user_input="hows the weather today in monterrey mexico?")
+    t.knowledge = "User lives in Monterrey"
+    assert plan(t).tool == "weather"
+
+    # A non-weather live-info query mentioning a stored fact still web-searches
+    # rather than being short-circuited by the incidental overlap.
+    t2 = Thought(user_input="whats the latest news about monterrey")
+    t2.knowledge = "User lives in Monterrey"
+    assert plan(t2).tool == "web"
+
+    # A genuinely memory-answerable, non-live query still short-circuits.
+    t3 = Thought(user_input="what is the capital of france")
+    t3.knowledge = "France capital is Paris"
+    assert plan(t3).tool == "none"
+    print("  [OK] Live-info query not suppressed by incidental memory overlap")
+
+
 # ──────────────────────────────────────────────────────────────
 # Router
 # ──────────────────────────────────────────────────────────────
@@ -118,6 +161,76 @@ def test_route_all_skips_none_and_returns_empty():
     contexts = route_all([PlannerDecision(tool="none")], Thought(user_input="x"))
     assert contexts == []
     print("  [OK] route_all skips no-op decisions")
+
+
+# ──────────────────────────────────────────────────────────────
+# Weather routing + temperature disambiguation
+# ──────────────────────────────────────────────────────────────
+
+def _tool_for(q):
+    return [d.tool for d in plan_tools(Thought(user_input=q))]
+
+
+def test_temperature_disambiguation():
+    # Ambient temperature -> weather
+    assert _tool_for("whats the temperature outside") == ["weather"]
+    assert _tool_for("but whats the aproximate temperature like?") == ["weather"]
+    # CPU/GPU temperature -> system telemetry
+    assert _tool_for("is my cpu temperature ok") == ["system"]
+    assert _tool_for("whats my gpu temp") == ["system"]
+    print("  [OK] 'temperature' routes to weather vs system by hardware context")
+
+
+def test_weather_queries_route_to_weather_tool():
+    for q in ["whats the weather like today on monterrey?",
+              "is it hot in paris",
+              "will it rain tomorrow"]:
+        assert "weather" in _tool_for(q), f"Expected weather tool for {q!r}"
+    print("  [OK] Weather queries route to the weather tool")
+
+
+def test_extract_location():
+    from athena.planner.planner import _extract_location
+    assert _extract_location("whats the weather like today on monterrey?") == "monterrey"
+    assert _extract_location("weather in paris today") == "paris"
+    assert _extract_location("hows the weather") == ""
+    print("  [OK] Location extraction from weather queries")
+
+
+def test_weather_tool_parse_and_failure():
+    import json
+    from unittest.mock import patch
+    from athena.tools import weather
+
+    fake = {
+        "current_condition": [{
+            "temp_C": "22", "FeelsLikeC": "24", "humidity": "50",
+            "windspeedKmph": "11", "weatherDesc": [{"value": "Partly cloudy"}],
+        }],
+        "nearest_area": [{
+            "areaName": [{"value": "Monterrey"}],
+            "region": [{"value": "Nuevo Leon"}],
+            "country": [{"value": "Mexico"}],
+        }],
+    }
+
+    class FakeResp:
+        def __init__(self, d): self._d = json.dumps(d).encode()
+        def read(self): return self._d
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+
+    with patch("urllib.request.urlopen", return_value=FakeResp(fake)):
+        data = weather.fetch_weather("monterrey")
+    assert data["temp_c"] == "22"
+    assert "Monterrey" in data["location"]
+    rendered = weather.format_weather(data)
+    assert "22" in rendered and "Partly cloudy" in rendered
+
+    # Any network/parse failure returns None (caller degrades gracefully).
+    with patch("urllib.request.urlopen", side_effect=Exception("no net")):
+        assert weather.fetch_weather("x") is None
+    print("  [OK] Weather tool parses results and fails safely")
 
 
 # ──────────────────────────────────────────────────────────────
@@ -151,7 +264,14 @@ if __name__ == "__main__":
         test_requirements_query_build,
         test_plan_tools_chains_web_and_system,
         test_plan_tools_single_tool_unchanged,
+        test_live_info_and_contractions_trigger_web,
+        test_personal_queries_do_not_web_search,
+        test_live_info_not_suppressed_by_memory_overlap,
         test_route_all_skips_none_and_returns_empty,
+        test_temperature_disambiguation,
+        test_weather_queries_route_to_weather_tool,
+        test_extract_location,
+        test_weather_tool_parse_and_failure,
         test_multiple_tool_sources_injected,
     ]
     failed = 0

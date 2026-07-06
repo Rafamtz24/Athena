@@ -19,11 +19,27 @@ from athena.planner.models import PlannerDecision
 _SYSTEM_HEALTH_KEYWORDS = [
     "health", "healthy", "health check",
     "performance", "slow", "speed",
-    "temperature", "temp", "hot", "cooling",
     "usage", "utilization", "running",
     "bottleneck", "throttling",
-    "memory", "ram usage", "cpu usage", "gpu usage",
+    "ram usage", "cpu usage", "gpu usage",
     "how is my", "how healthy",
+]
+
+# Thermal words are ambiguous: "cpu temperature" is hardware telemetry, but
+# "temperature outside" is weather. They count as a system-health signal ONLY
+# when a hardware-context word is also present; otherwise they mean weather.
+_THERMAL_KEYWORDS = [
+    "temperature", "temp", "hot", "cold", "cooling", "overheating", "thermal",
+]
+_SYSTEM_CONTEXT_WORDS = [
+    "cpu", "gpu", "ram", "vram", "pc", "computer", "system", "machine",
+    "rig", "processor", "chip", "fan", "hardware", "laptop",
+]
+
+# Weather-specific terms always route to the weather tool.
+_WEATHER_KEYWORDS = [
+    "weather", "forecast", "rain", "raining", "rainy", "snow", "snowing",
+    "humidity", "sunny", "cloudy", "storm", "climate",
 ]
 
 _WEB_SEARCH_KEYWORDS = [
@@ -32,6 +48,17 @@ _WEB_SEARCH_KEYWORDS = [
     "what is", "what are", "who is",
     "google", "browse", "internet",
     "latest", "news about", "recent",
+]
+
+# Topics that are inherently live / external and cannot be answered from
+# memory — they always require a web search for a current, truthful answer.
+_LIVE_INFO_KEYWORDS = [
+    "weather", "temperature", "forecast", "raining", "snowing",
+    "price of", "cost of", "how much is", "stock price", "share price",
+    "exchange rate", "conversion rate",
+    "news", "headlines",
+    "who won", "score", "final score", "match result",
+    "release date", "when does", "when is",
 ]
 
 _HARDWARE_FACT_PREFIXES = [
@@ -73,17 +100,26 @@ def _knowledge_contains_hardware(knowledge_str: str) -> bool:
     return False
 
 
+def _has_system_context(lower: str) -> bool:
+    """True if the text mentions the user's own hardware/computer."""
+    return any(word in lower for word in _SYSTEM_CONTEXT_WORDS)
+
+
 def _is_system_health_query(user_input: str) -> bool:
     """Detect if user is asking about system health or performance."""
     lower = user_input.lower()
     for kw in _SYSTEM_HEALTH_KEYWORDS:
         if kw in lower:
             return True
-    # Detect runtime telemetry questions
+    # Thermal words are system telemetry ONLY with hardware context present
+    # (e.g. "cpu temperature"); "temperature outside" is weather, not this.
+    if any(t in lower for t in _THERMAL_KEYWORDS) and _has_system_context(lower):
+        return True
+    # Detect runtime telemetry questions (all require an explicit hardware term)
     runtime_patterns = [
         r'how.*(fast|hot|much).*(cpu|gpu|ram|memory|computer|system)',
         r'(cpu|gpu|ram|memory|computer).*(temperature|temp|speed|usage|utilization)',
-        r'what.*(temperature|temp|speed|usage).*',
+        r'(temperature|temp|speed|usage)\s+of\s+(my\s+)?(cpu|gpu|ram|memory|computer|pc|system)',
         r'check.*(system|health|performance)',
         r'(do|run)\s+a\s+health\s+check',
         r'why\s+is\s+my\s+(computer|pc|system)\s+(slow|lagging|hot)',
@@ -92,6 +128,40 @@ def _is_system_health_query(user_input: str) -> bool:
         if re.search(pat, lower):
             return True
     return False
+
+
+def _is_weather_query(user_input: str) -> bool:
+    """Detect a weather query (routes to the dedicated weather tool).
+
+    Weather terms always match. Thermal terms (temperature/hot/cold) match
+    only WITHOUT hardware context — with it they are system telemetry.
+    """
+    lower = user_input.lower()
+    if any(kw in lower for kw in _WEATHER_KEYWORDS):
+        return True
+    if any(t in lower for t in _THERMAL_KEYWORDS) and not _has_system_context(lower):
+        return True
+    return False
+
+
+def _extract_location(user_input: str) -> str:
+    """Extract a location from a weather query (best effort).
+
+    Looks for a trailing "in/at/on/for <place>" phrase; returns "" when none is
+    found (the weather tool then falls back to IP geolocation).
+    """
+    lower = user_input.lower().rstrip("?.! ")
+    match = re.search(r"\b(?:in|at|on|for)\s+([a-z][a-z .,'\-]*)$", lower)
+    if not match:
+        return ""
+    location = match.group(1)
+    # Drop trailing time words that are not part of the place name.
+    location = re.sub(
+        r"\b(today|tomorrow|tonight|right now|now|currently|this week|this weekend)\b",
+        "",
+        location,
+    )
+    return location.strip(" ,")
 
 
 def _is_personal_hardware_query(user_input: str) -> bool:
@@ -141,6 +211,24 @@ def _is_personal_query(user_input: str) -> bool:
     return True
 
 
+def _normalize_contractions(text: str) -> str:
+    """Expand common question-word contractions ("whats" -> "what is")."""
+    return re.sub(r"\b(what|how|where|who|when)('s|s)\b", r"\1 is", text.lower())
+
+
+def _is_live_info_query(user_input: str) -> bool:
+    """Detect a query about inherently live/external information.
+
+    Weather, prices, news, scores and the like can never be answered from
+    memory, so they always need a fresh web search and must never be
+    short-circuited by incidental semantic-memory overlap (e.g. the query
+    mentions the user's city, which happens to be a stored fact).
+    """
+    lower = user_input.lower()
+    normalized = _normalize_contractions(lower)
+    return any(kw in lower or kw in normalized for kw in _LIVE_INFO_KEYWORDS)
+
+
 def _is_web_search_query(user_input: str) -> bool:
     """Detect if user is asking for information likely needing a web search."""
     lower = user_input.lower()
@@ -153,9 +241,20 @@ def _is_web_search_query(user_input: str) -> bool:
     if _is_personal_query(user_input):
         return False
 
+    # Live / external topics (weather, prices, news, scores...) can never be
+    # answered from memory and always need a fresh web search.
+    if _is_live_info_query(user_input):
+        return True
+
+    # Normalize common contractions so "whats"/"hows"/"wheres"/"whos" are
+    # treated like their expanded forms ("what is", ...). Without this, a query
+    # like "whats the weather" slipped past the "what is" keyword and no tool
+    # ran, leaving the model to fabricate an answer.
+    normalized = _normalize_contractions(lower)
+
     # Check explicit web search commands and prefixes
     for kw in _WEB_SEARCH_KEYWORDS:
-        if kw in lower:
+        if kw in lower or kw in normalized:
             return True
 
     # Detect "latest/current/recent <something>" patterns
@@ -282,6 +381,23 @@ def plan(thought: Any) -> PlannerDecision:
             reason="System health query without known hardware — full snapshot needed.",
         )
 
+    # ── Rule 2b: Weather query → dedicated weather tool ──
+    # Runs after system health so "cpu temperature" stays a system check, but
+    # before web search so ambient weather uses a real weather source instead
+    # of generic search snippets.
+    if _is_weather_query(user_input):
+        from athena.config.settings import get_settings
+        if not get_settings().web_search.enabled:
+            return PlannerDecision(
+                tool="none",
+                reason="Weather needs network access, which is disabled in settings.",
+            )
+        return PlannerDecision(
+            tool="weather",
+            query=_extract_location(user_input),
+            reason="Weather query — fetching current conditions from a weather source.",
+        )
+
     # ── Rule 3: History recall (no tool needed) ──
     # If user is asking about what they said, working memory has it
     recall_keywords = [
@@ -314,9 +430,11 @@ def plan(thought: Any) -> PlannerDecision:
 
         query = _extract_web_query(user_input)
 
-        # Always prefer existing knowledge before requesting web search.
-        # If semantic memory already has relevant information, no tool needed.
-        if _has_semantic_knowledge(thought):
+        # Prefer existing knowledge before requesting a web search — but NEVER
+        # for live/external topics. Otherwise an incidental overlap (e.g. the
+        # user's stored city appearing in a "weather in <city>" query) would
+        # wrongly suppress the search and leave the model with no live data.
+        if not _is_live_info_query(user_input) and _has_semantic_knowledge(thought):
             knowledge_lower = knowledge_str.lower()
             query_words = [w.lower() for w in re.findall(r'[a-z]+', query) if len(w) > 3]
             has_relevant_knowledge = any(w in knowledge_lower for w in query_words) if query_words else False

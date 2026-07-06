@@ -64,7 +64,7 @@ class ProviderFactory:
             hardware = HardwareDetector().detect()
             config = AutoConfigurator().configure(hardware)
 
-            _print_startup_banner(hardware, config)
+            _print_startup_banner()
 
             return LlamaCppProvider(inference_config=config)
 
@@ -75,28 +75,17 @@ class ProviderFactory:
             )
 
 
-def _print_startup_banner(
-    hardware: "HardwareInfo",
-    config: "InferenceConfiguration",
-) -> None:
-    """Print the hardware detection and inference configuration banner."""
-    print("\n" + "=" * 50)
-    print("Hardware Detected")
-    print("=" * 50)
-    print(f"  CPU:  {hardware.cpu.model}")
-    print(f"        {hardware.cpu.physical_cores} physical cores, "
-          f"{hardware.cpu.logical_threads} logical threads")
-    print(f"  GPU:  {hardware.gpu.vendor} {hardware.gpu.model}")
-    if hardware.gpu.vram_gb is not None:
-        print(f"  VRAM: {hardware.gpu.vram_gb} GB")
-    print(f"  RAM:  {hardware.ram.total_gb} GB")
-    print()
-    print("=" * 50)
-    print("Inference Configuration")
-    print("=" * 50)
-    print(f"  Backend:    {config.backend}")
-    print(f"  GPU Layers: {config.gpu_layers}")
-    print(f"  Threads:    {config.n_threads}")
-    print(f"  Batch:      {config.n_batch}")
-    print(f"  Context:    {config.n_ctx}")
-    print()
+# Startup logo shown at launch. Hardware detection and inference tuning still
+# run (they configure the model); they are just no longer printed.
+_ATHENA_BANNER = r"""
+    _  _____ _   _ _____ _   _    _
+   / \|_   _| | | | ____| \ | |  / \
+  / _ \ | | | |_| |  _| |  \| | / _ \
+ / ___ \| | |  _  | |___| |\  |/ ___ \
+/_/   \_\_| |_| |_|_____|_| \_/_/   \_\
+"""
+
+
+def _print_startup_banner() -> None:
+    """Print the Athena startup logo."""
+    print(_ATHENA_BANNER)

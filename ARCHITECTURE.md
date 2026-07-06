@@ -164,7 +164,8 @@ Two-phase knowledge pipeline:
 - **Tool Planner** (`planner/planner.py`) — Decides which tool(s) are needed based on user input. `plan_tools()` returns one or more `PlannerDecision`s; most queries need at most one, but some chain several (e.g. a "can I run X" compatibility check returns `/web` for the software's requirements **and** `/system` for the user's hardware).
 - **Tool Router** (`tools/router.py`) — The sole component that executes tools. `route_all()` executes each decision in order and produces one `ToolContext` per tool.
 - **ToolContext** (`tools/models.py`) — Temporary context with metadata: `tool_name`, `content`, `priority`, `learning_visible`. When tools are chained, each produces its own reasoning source (`tool:<name>`); only the `/system` snapshot feeds the learning extractor's hardware-fact slot.
-- Current tools: `/system` (System Snapshot), `/web` (Web Search via DuckDuckGo)
+- Current tools: `/system` (System Snapshot), `/web` (Web Search via DuckDuckGo), `weather` (current conditions via wttr.in — a keyless weather source, so weather queries return real values instead of search snippets).
+- **Query routing note:** thermal terms are disambiguated by context — "cpu temperature" is a system check, "temperature outside" is weather. Live/external topics (weather, prices, news) are never satisfied from memory, so a stored fact that merely overlaps the query (e.g. the user's city) never suppresses the lookup.
 
 ### Providers (`athena/providers/`)
 

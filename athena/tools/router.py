@@ -205,6 +205,41 @@ def _execute_web_tool(decision: PlannerDecision) -> ToolContext:
     )
 
 
+def _execute_weather_tool(decision: PlannerDecision) -> ToolContext:
+    """Execute the Weather tool.
+
+    Fetches current conditions from a weather source (wttr.in). Weather is
+    transient, so the ToolContext is NOT learning-visible. On failure, returns
+    an empty ToolContext so the model reports it has no data rather than
+    fabricating one.
+    """
+    from athena.config.settings import get_settings
+    from athena.tools.weather import fetch_weather, format_weather
+
+    ws = get_settings().web_search
+    location = decision.query or ""
+    data = fetch_weather(location, timeout=ws.timeout, user_agent=ws.user_agent)
+
+    if data is None:
+        logger.warning("Weather lookup failed for location: %s", location or "(auto)")
+        return ToolContext(
+            tool_name="weather",
+            content="",
+            prompt=location,
+            learning_visible=False,
+            metadata={"query": location, "status": "failed"},
+        )
+
+    print("Fetched weather.")
+    return ToolContext(
+        tool_name="weather",
+        content=format_weather(data),
+        prompt=location,
+        learning_visible=False,
+        metadata={"query": location, "status": "success"},
+    )
+
+
 def route(
     decision: PlannerDecision,
     thought: Any,
@@ -235,10 +270,13 @@ def route(
     if decision.tool == "web":
         return _execute_web_tool(decision)
 
+    if decision.tool == "weather":
+        return _execute_weather_tool(decision)
+
     # ── Unknown tool — raise so the caller knows a tool is missing ──
     raise ValueError(
         f"Unknown tool '{decision.tool}'. "
-        f"Available tools: system, web. "
+        f"Available tools: system, web, weather. "
         f"Register new tools in athena/tools/router.py"
     )
 
