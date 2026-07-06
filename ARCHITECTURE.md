@@ -77,8 +77,8 @@ A Thought is the temporary cognitive workspace for one interaction. It carries:
 - `history` — Working Memory / conversation history
 - `memories` — Episodic memories
 - `knowledge` — Semantic Memory retrieval
-- `planner_decision` — Output of the Tool Planner
-- `tool_context` — ToolContext produced by the Tool Router
+- `planner_decision` / `planner_decisions` — Output of the Tool Planner (primary decision, and the full list when tools are chained)
+- `tool_context` / `tool_contexts` — ToolContext(s) produced by the Tool Router (primary, and the full list when tools are chained)
 - `reasoning_package` — ReasoningContextPackage (budgeted context for PromptBuilder)
 - `learning_package` — LearningContextPackage (budgeted context for KnowledgeExtractor)
 - `response` — The generated assistant response
@@ -92,8 +92,8 @@ The pipeline processes a single interaction through 15 stages:
 1. `_initialize()` — Set metadata, publish ThoughtCreated
 2. `_load_memory()` — Load episodic memories
 3. `_load_knowledge()` — Retrieve Semantic Memory
-4. `_plan_tool()` — Tool Planner: decide if a tool is needed
-5. `_execute_tool()` — Tool Router: execute tool if needed
+4. `_plan_tool()` — Tool Planner: decide which tool(s) are needed
+5. `_execute_tool()` — Tool Router: execute the planned tool(s) if any
 6. `_reason()` — Publish ReasoningStarted
 7. `_plan()` — Publish PlanningStarted
 8. `_prepare_tools()` — Verify tool context, publish ToolsPrepared
@@ -161,15 +161,15 @@ Two-phase knowledge pipeline:
 
 ### Tool System (`athena/tools/`)
 
-- **Tool Planner** (`planner/planner.py`) — Decides if a tool is needed based on user input
-- **Tool Router** (`tools/router.py`) — The sole component that executes tools. Produces a `ToolContext`
-- **ToolContext** (`tools/models.py`) — Temporary context with metadata: `tool_name`, `content`, `priority`, `learning_visible`
+- **Tool Planner** (`planner/planner.py`) — Decides which tool(s) are needed based on user input. `plan_tools()` returns one or more `PlannerDecision`s; most queries need at most one, but some chain several (e.g. a "can I run X" compatibility check returns `/web` for the software's requirements **and** `/system` for the user's hardware).
+- **Tool Router** (`tools/router.py`) — The sole component that executes tools. `route_all()` executes each decision in order and produces one `ToolContext` per tool.
+- **ToolContext** (`tools/models.py`) — Temporary context with metadata: `tool_name`, `content`, `priority`, `learning_visible`. When tools are chained, each produces its own reasoning source (`tool:<name>`); only the `/system` snapshot feeds the learning extractor's hardware-fact slot.
 - Current tools: `/system` (System Snapshot), `/web` (Web Search via DuckDuckGo)
 
 ### Providers (`athena/providers/`)
 
 All providers implement `LLMProvider` (abstract base):
-- `generate(message)` — Generate a response
+- `generate(message, system=None)` — Generate a response. The optional `system` prompt is delivered in the model's `system` role so it adopts Athena's identity rather than the base model's (which otherwise makes it identify as e.g. "Qwen").
 - `health_check()` — Check availability
 - `count_tokens(text)` — Count tokens using the provider's native tokenizer
 - `get_context_window()` — Get the maximum context window size in tokens

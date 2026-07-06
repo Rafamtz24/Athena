@@ -21,12 +21,16 @@ class LMStudioProvider:
     def __init__(self, base_url: str | None = None):
         self.base_url = base_url or get_settings().provider.base_url
 
-    def generate(self, prompt: str) -> str:
+    def generate(self, prompt: str, system: str | None = None) -> str:
         """
         Generate a response from LM Studio.
 
         Args:
-            prompt: The input prompt string.
+            prompt: The input prompt string (user content).
+            system: Optional system prompt. Delivered in the `system` role so
+                the model treats it as its own identity/instructions rather
+                than as a user claim (otherwise the base model's built-in
+                identity, e.g. "You are Qwen", stays in force).
 
         Returns:
             The LLM response text.
@@ -34,15 +38,15 @@ class LMStudioProvider:
         Raises:
             RuntimeError: If the LM Studio provider is unavailable or returns an error.
         """
+        messages = []
+        if system:
+            messages.append({"role": "system", "content": system})
+        messages.append({"role": "user", "content": prompt})
+
         url = f"{self.base_url}/v1/chat/completions"
         payload = {
             "model": get_settings().provider.model,
-            "messages": [
-                {
-                    "role": "user",
-                    "content": prompt
-                }
-            ],
+            "messages": messages,
             "temperature": get_settings().provider.temperature,
             "stream": False
         }

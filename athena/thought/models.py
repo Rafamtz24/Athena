@@ -53,8 +53,10 @@ class Thought:
     plan: list = field(default_factory=list)
     tool_requests: list = field(default_factory=list)
     tool_results: list = field(default_factory=list)
-    tool_context: Optional[ToolContext] = None
-    planner_decision: Optional[PlannerDecision] = None
+    tool_context: Optional[ToolContext] = None          # Primary (first) tool context, for compatibility
+    tool_contexts: list = field(default_factory=list)   # All tool contexts when tools are chained
+    planner_decision: Optional[PlannerDecision] = None   # Primary (first) decision, for compatibility
+    planner_decisions: list = field(default_factory=list)  # All decisions when tools are chained
     reasoning_package: Any = None
     learning_package: Any = None
     response: Any = None

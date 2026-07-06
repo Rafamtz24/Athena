@@ -83,12 +83,16 @@ class LlamaCppProvider:
 
         self.model = LlamaCppProvider._model
 
-    def generate(self, prompt: str) -> str:
+    def generate(self, prompt: str, system: str | None = None) -> str:
         """
         Generate a response from the local GGUF model.
 
         Args:
-            prompt: The input prompt string.
+            prompt: The input prompt string (user content).
+            system: Optional system prompt. Delivered in the `system` role so
+                the model treats it as its own identity/instructions rather
+                than as a user claim. Without this, the base model's built-in
+                system identity (e.g. "You are Qwen") stays in force.
 
         Returns:
             The LLM response text.
@@ -96,10 +100,13 @@ class LlamaCppProvider:
         Raises:
             RuntimeError: If the model fails to generate a response.
         """
+        messages = []
+        if system:
+            messages.append({"role": "system", "content": system})
+        messages.append({"role": "user", "content": prompt})
+
         response = self.model.create_chat_completion(
-            messages=[
-                {"role": "user", "content": prompt},
-            ],
+            messages=messages,
             temperature=self.temperature,
         )
 

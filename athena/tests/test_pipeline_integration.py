@@ -14,7 +14,7 @@ class MockProvider:
     def get_context_window(self):
         return 4096
 
-    def generate(self, prompt):
+    def generate(self, prompt, system=None):
         return "This is a mock response."
 
     def call(self, prompt):

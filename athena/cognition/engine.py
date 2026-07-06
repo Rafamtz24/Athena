@@ -9,6 +9,7 @@ import traceback
 
 from athena.logging.logger import logger
 from athena.prompt.builder import PromptBuilder
+from athena.prompt.loader import PromptLoader
 
 
 class CognitiveEngine:
@@ -43,8 +44,15 @@ class CognitiveEngine:
             thought.trace["prompt"] = {
                 "text": prompt
             }
+            # Deliver Athena's identity/instructions in the `system` role so the
+            # model adopts it as its own identity instead of treating it as a
+            # user claim (which let the base model insist it was e.g. "Qwen").
             try:
-                response = self.provider.generate(prompt)
+                system_prompt = PromptLoader.get_system_prompt("reasoning")
+            except Exception:
+                system_prompt = None
+            try:
+                response = self.provider.generate(prompt, system=system_prompt)
                 thought.set_response(response)
             except Exception as e:
                 # Provider failed — set error trace, provide fallback response

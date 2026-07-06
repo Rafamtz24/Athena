@@ -71,6 +71,9 @@ def _execute_system_tool(
         memory_info=memory_info,
     )
 
+    # ── Console notification ──
+    print("Performed system check.")
+
     return ToolContext(
         tool_name="system",
         content=snapshot_content,
@@ -238,3 +241,33 @@ def route(
         f"Available tools: system, web. "
         f"Register new tools in athena/tools/router.py"
     )
+
+
+def route_all(
+    decisions: list,
+    thought: Any,
+    memory_manager: Optional[Any] = None,
+    provider: Optional[Any] = None,
+) -> list:
+    """Execute a list of PlannerDecisions and return their ToolContexts.
+
+    Each decision is routed via `route()`. Decisions that require no execution
+    (tool == "none") yield no context and are skipped. The returned list
+    preserves execution order, so a compatibility check produces the web
+    results first, then the system snapshot.
+
+    Args:
+        decisions: PlannerDecisions produced by the Tool Planner.
+        thought: The current Thought object (for context).
+        memory_manager: MemoryManager instance (needed by some tools).
+        provider: LLM provider instance (needed by some tools).
+
+    Returns:
+        A list of ToolContext objects (may be empty).
+    """
+    contexts = []
+    for decision in decisions:
+        context = route(decision, thought, memory_manager, provider)
+        if context is not None:
+            contexts.append(context)
+    return contexts

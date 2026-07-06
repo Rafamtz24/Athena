@@ -138,6 +138,13 @@ def test_prompt_builder_from_package():
     assert 'Knowledge' in prompt
     assert 'New York' in prompt
 
+    # The current user input must be rendered LAST so the model responds to it
+    # instead of continuing the conversation history (which caused verbatim
+    # repetition on short follow-ups).
+    assert prompt.rstrip().endswith('What is the weather today?'), (
+        "Current user input must be the final section of the prompt"
+    )
+
     print(f"[PASS] PromptBuilder renders ReasoningContextPackage correctly")
     print(f"       Prompt length: {len(prompt)} chars")
 

@@ -100,11 +100,18 @@ class PromptBuilder:
     def _build_from_package(self, package) -> str:
         """Build prompt from a ReasoningContextPackage.
 
-        Renders each ContextSource in priority order with section headers.
+        Renders each ContextSource in priority order with section headers, with
+        one exception: the current user input is rendered LAST regardless of its
+        priority. A causal model continues from whatever ends the prompt, so if
+        the conversation history (ending in the previous assistant turn) came
+        last, the model would repeat itself on short follow-ups like "yes".
+        Placing the current input last makes it the message the model responds to.
+
         PERFORMANCE: Section header tuples are cached as class-level
         constants to avoid repeated list creation on every build.
         """
         lines = []
+        user_input_content = None
 
         for source in package.sources:
             name = source.name
@@ -119,9 +126,9 @@ class PromptBuilder:
                 lines.append("")
                 continue
             elif name == "user_input":
-                lines.extend(self._HEADER_USER_INPUT)
-                lines.append(content)
-                lines.extend(self._TRAILING_NEWLINE)
+                # Deferred — rendered last (see docstring).
+                user_input_content = content
+                continue
             elif name == "working_memory":
                 lines.extend(self._HEADER_WORKING_MEMORY)
                 lines.append(content)
@@ -153,6 +160,14 @@ class PromptBuilder:
                 lines.extend(self._HEADER_GENERIC_SUFFIX)
                 lines.append(content)
                 lines.extend(self._TRAILING_NEWLINE)
+
+        # Current user input rendered LAST so the model responds to it rather
+        # than continuing the conversation history that would otherwise end
+        # the prompt.
+        if user_input_content:
+            lines.extend(self._HEADER_USER_INPUT)
+            lines.append(user_input_content)
+            lines.extend(self._TRAILING_NEWLINE)
 
         return "\n".join(lines)
 

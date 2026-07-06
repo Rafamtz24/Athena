@@ -46,6 +46,20 @@ _NEVER_TRIM_PRIORITIES = {
 }
 
 
+def _iter_tool_contexts(thought: Any) -> list:
+    """Return all tool contexts on a thought.
+
+    Prefers the multi-tool `tool_contexts` list (populated when tools are
+    chained); falls back to the singular `tool_context` for backward
+    compatibility. None entries are filtered out.
+    """
+    contexts = getattr(thought, 'tool_contexts', None)
+    if contexts:
+        return [c for c in contexts if c is not None]
+    single = getattr(thought, 'tool_context', None)
+    return [single] if single is not None else []
+
+
 class ContextBudgetManager:
     """Compiles context sources into budgeted Reasoning and Learning packages.
 
@@ -201,10 +215,10 @@ class ContextBudgetManager:
             content = str(knowledge) if not isinstance(knowledge, str) else knowledge
             non_wm_tokens += self._count_tokens(content)
 
-        # 4. Tool Context
-        tool_context = getattr(thought, 'tool_context', None)
-        if tool_context is not None and tool_context.content:
-            non_wm_tokens += self._count_tokens(tool_context.content)
+        # 4. Tool Context(s)
+        for tc in _iter_tool_contexts(thought):
+            if tc.content:
+                non_wm_tokens += self._count_tokens(tc.content)
 
         # 5. Chat History (from thought.memories)
         chat_history = getattr(thought, 'memories', []) or []
@@ -314,16 +328,16 @@ class ContextBudgetManager:
                 truncatable=False,
             ))
 
-        # 5. Tool Context(s) (priority 70, may be trimmed)
-        tool_context = getattr(thought, 'tool_context', None)
-        if tool_context is not None and tool_context.content:
-            sources.append(ContextSource(
-                name=f"tool:{tool_context.tool_name}",
-                content=tool_context.content,
-                priority=getattr(tool_context, 'priority', PRIORITY_TOOL_CONTEXT),
-                learning_visible=getattr(tool_context, 'learning_visible', True),
-                truncatable=True,
-            ))
+        # 5. Tool Context(s) (priority 70, may be trimmed) — one source per tool
+        for tc in _iter_tool_contexts(thought):
+            if tc.content:
+                sources.append(ContextSource(
+                    name=f"tool:{tc.tool_name}",
+                    content=tc.content,
+                    priority=getattr(tc, 'priority', PRIORITY_TOOL_CONTEXT),
+                    learning_visible=getattr(tc, 'learning_visible', True),
+                    truncatable=True,
+                ))
 
         # 6. Chat History (priority 60, may be trimmed)
         chat_history = getattr(thought, 'memories', []) or []
@@ -520,10 +534,13 @@ class ContextBudgetManager:
             parts.append(f"Assistant: {response}")
         conversation = "\n".join(parts) if parts else thought.user_input
 
-        # Extract tool context content (if learning_visible)
+        # Extract System Snapshot content for learning. The Knowledge Extractor
+        # frames tool_context_content as a System Snapshot (with hardware-fact
+        # rules), so ONLY the system tool's content belongs here — web or other
+        # tool output must not be mislabeled as durable hardware facts.
         tool_context_content = ""
         for source in learning_sources:
-            if source.name.startswith("tool:"):
+            if source.name == "tool:system":
                 tool_context_content = source.content
                 break
 

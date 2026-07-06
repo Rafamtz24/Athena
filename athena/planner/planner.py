@@ -173,6 +173,49 @@ def _is_web_search_query(user_input: str) -> bool:
     return False
 
 
+def _is_requirements_check_query(user_input: str) -> bool:
+    """Detect a "can I run X / do I meet the requirements" style query.
+
+    These need BOTH external info (the software's system requirements) and the
+    user's local hardware specs to answer, so the planner chains a web search
+    with a system snapshot.
+    """
+    lower = user_input.lower()
+    patterns = [
+        r'\b(can|could|would|will|should) i (run|play|handle)\b',
+        r'\bi (can|could|would|will) (run|play|handle)\b',
+        r'\b(will|can|could) it run\b',
+        r'\bwill .+ run on\b',
+        r'\b(be )?able to run\b',
+        r'\benough (to run|for)\b',
+        r'\bhandle running\b',
+        r'\bdo i meet\b',
+        r'\bmeet .*requirements\b',
+        r'\bmy (pc|computer|system|rig|setup|machine)\b.*\b(run|play|handle)\b',
+        r'\b(run|play|handle)\b.*\bon my (pc|computer|system|rig|setup|machine)\b',
+    ]
+    return any(re.search(pat, lower) for pat in patterns)
+
+
+def _build_requirements_query(user_input: str) -> str:
+    """Build a web-search query for the software's system requirements.
+
+    Strips common lead-in/filler words so the software (e.g. game) name
+    remains, then appends "system requirements".
+    """
+    text = user_input.strip().rstrip("?.!")
+    filler = (
+        r'\b(do|does|you|think|can|could|would|will|i|is|it|be|able|to|'
+        r'run|running|play|handle|on|my|the|a|pc|computer|system|rig|'
+        r'setup|machine|enough|for|meet|requirements?)\b'
+    )
+    subject = re.sub(filler, ' ', text, flags=re.IGNORECASE)
+    subject = re.sub(r'\s+', ' ', subject).strip(" ,")
+    if not subject:
+        subject = text
+    return f"{subject} system requirements".strip()
+
+
 def _is_direct_system_command(user_input: str) -> bool:
     """Detect explicit /system command."""
     return user_input.strip().lower().startswith("/system")
@@ -311,3 +354,38 @@ def plan(thought: Any) -> PlannerDecision:
         tool="none",
         reason="Athena has sufficient information to answer.",
     )
+
+
+def plan_tools(thought: Any) -> list:
+    """Determine which tool(s) Athena needs — supports chaining multiple.
+
+    Most queries need at most one tool, in which case this returns a single
+    decision (delegating to `plan`). Some queries need several: a
+    "can I run X" compatibility check needs both a web search (the software's
+    system requirements) and a system snapshot (the user's hardware), so this
+    returns both decisions for the Tool Router to execute in order.
+
+    Returns:
+        A non-empty list of PlannerDecision objects. When no tool is needed
+        the list contains a single "none" decision.
+    """
+    user_input = getattr(thought, "user_input", "")
+
+    if user_input and user_input.strip() and _is_requirements_check_query(user_input):
+        from athena.config.settings import get_settings
+
+        decisions = []
+        if get_settings().web_search.enabled:
+            decisions.append(PlannerDecision(
+                tool="web",
+                query=_build_requirements_query(user_input),
+                reason="Compatibility check — fetch the software's system requirements.",
+            ))
+        decisions.append(PlannerDecision(
+            tool="system",
+            reason="Compatibility check — gather local hardware specs to compare.",
+        ))
+        return decisions
+
+    # Fall back to single-tool planning (unchanged behavior).
+    return [plan(thought)]

@@ -36,7 +36,9 @@ from athena.events.models import Event
 from athena.thought.models import Thought
 from athena.cognition.engine import CognitiveEngine
 from athena.planner.planner import plan as plan_tool
+from athena.planner.planner import plan_tools
 from athena.tools.router import route as execute_tool
+from athena.tools.router import route_all
 
 
 class ThoughtPipeline:
@@ -288,7 +290,11 @@ class ThoughtPipeline:
         The planner does NOT have access to Tool Context (it doesn't exist yet).
         The planner produces a PlannerDecision stored on the thought.
         """
-        decision = plan_tool(thought)
+        decisions = plan_tools(thought)
+        thought.planner_decisions = decisions
+        # Primary decision retained for backward compatibility with consumers
+        # that expect a single planner_decision.
+        decision = decisions[0]
         thought.planner_decision = decision
         thought.trace["planner_decision"] = {
             "tool": decision.tool,
@@ -296,7 +302,12 @@ class ThoughtPipeline:
             "prompt": decision.prompt,
             "reason": decision.reason,
         }
+        thought.trace["planner_decisions"] = [
+            {"tool": d.tool, "query": d.query, "prompt": d.prompt, "reason": d.reason}
+            for d in decisions
+        ]
         thought.metadata["planner_decision"] = decision.tool
+        thought.metadata["planner_tools"] = [d.tool for d in decisions]
 
         thought.metadata["stage"] = "tool_planned"
         bus = get_event_bus()
@@ -306,6 +317,7 @@ class ThoughtPipeline:
             payload={
                 "user_input": thought.user_input,
                 "decision_tool": decision.tool,
+                "decision_tools": [d.tool for d in decisions],
                 "decision_reason": decision.reason,
             },
             metadata={"stage": "tool_planned"},
@@ -319,8 +331,13 @@ class ThoughtPipeline:
         It receives the PlannerDecision and returns a ToolContext (or None).
         The ToolContext is stored on the thought for prompt injection.
         """
-        decision = getattr(thought, "planner_decision", None)
-        if decision is None or not decision.requires_execution:
+        decisions = getattr(thought, "planner_decisions", None)
+        if not decisions:
+            single = getattr(thought, "planner_decision", None)
+            decisions = [single] if single is not None else []
+        exec_decisions = [d for d in decisions if d is not None and d.requires_execution]
+
+        if not exec_decisions:
             thought.metadata["tool_executed"] = False
             thought.metadata["stage"] = "tool_executed"
             bus = get_event_bus()
@@ -337,21 +354,28 @@ class ThoughtPipeline:
             bus.publish(event)
             return
 
-        # Route and execute the tool
-        tool_context = execute_tool(
-            decision=decision,
+        # Route and execute the tool(s), in planner order
+        tool_contexts = route_all(
+            decisions=exec_decisions,
             thought=thought,
             memory_manager=self.memory_manager,
             provider=self.provider,
         )
 
-        if tool_context is not None:
-            thought.tool_context = tool_context
+        thought.tool_contexts = tool_contexts
+        # Primary context retained for backward compatibility.
+        thought.tool_context = tool_contexts[0] if tool_contexts else None
+
+        if tool_contexts:
             thought.metadata["tool_executed"] = True
             thought.trace["tool_context"] = {
-                "tool_name": tool_context.tool_name,
-                "content_length": len(tool_context.content),
+                "tool_name": tool_contexts[0].tool_name,
+                "content_length": len(tool_contexts[0].content),
             }
+            thought.trace["tool_contexts"] = [
+                {"tool_name": c.tool_name, "content_length": len(c.content)}
+                for c in tool_contexts
+            ]
         else:
             thought.metadata["tool_executed"] = False
 
@@ -362,8 +386,9 @@ class ThoughtPipeline:
             source="thought_pipeline",
             payload={
                 "user_input": thought.user_input,
-                "tool": decision.tool,
-                "executed": tool_context is not None,
+                "tool": exec_decisions[0].tool,
+                "tools": [d.tool for d in exec_decisions],
+                "executed": bool(tool_contexts),
             },
             metadata={"stage": "tool_executed"},
         )
