@@ -296,6 +296,7 @@ Responsibilities:
 
 The Working Memory:
 
+- Is session-scoped: reset to an empty window at the start of each session (durable facts persist in Semantic Memory instead)
 - Evicts oldest entries via prune(max_tokens, entries) when budget is exceeded
 - Is pruned twice per interaction: in-pipeline (by Context Budget Manager) and post-response (by Brain)
 - Uses a deterministic token estimate: len(text) // 4

@@ -111,6 +111,7 @@
 
 ### Working Memory
 - Sliding window of conversation history
+- Session-scoped: reset to empty at the start of each session (durable facts live in Semantic Memory)
 - Self-prunes via `prune(max_tokens, entries)` instance method
 - Pruned in-pipeline (by Context Budget Manager) and post-response (by Brain)
 - Also stores temporary knowledge candidates

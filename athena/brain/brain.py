@@ -56,23 +56,26 @@ class AthenaBrain:
         )
         self.history: list[str] = []  # Active conversation context (may be pruned)
         self._ensure_storage_dir()
-        self._load_working_memory()
+        self._reset_working_memory()
         self._load_chat_history()
 
     def _ensure_storage_dir(self) -> None:
         """Create the data directory if it does not exist."""
         _WORKING_MEM_PATH.parent.mkdir(parents=True, exist_ok=True)
 
-    def _load_working_memory(self) -> None:
-        """Load active conversation context from working_memory.json."""
-        if not _WORKING_MEM_PATH.exists():
-            return
-        try:
-            with open(_WORKING_MEM_PATH, "r", encoding="utf-8") as f:
-                data = json.load(f)
-            self.history = data.get("history", [])
-        except (json.JSONDecodeError, KeyError, TypeError):
-            self.history = []
+    def _reset_working_memory(self) -> None:
+        """Start each session with empty Working Memory.
+
+        Working Memory is the sliding window of the CURRENT conversation, not
+        long-term storage — durable facts live in Semantic Memory, which
+        persists and is retrieved during reasoning. Persisting the conversation
+        window across sessions let stale turns (e.g. an old "my name is
+        TestUser") replay and override confirmed facts, so each new session
+        starts fresh. The cleared window is written to disk immediately so the
+        persisted file reflects the current session.
+        """
+        self.history = []
+        self._write_working_memory()
 
     def _load_chat_history(self) -> None:
         """Load chat_history.json or create it if missing."""

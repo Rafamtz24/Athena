@@ -25,10 +25,15 @@ from athena.config.settings import get_settings
 
 # ── Priority Constants ────────────────────────────────────────────────
 
+# Authority order (high -> low): the user's current message wins, then
+# confirmed durable facts (Semantic Memory), then the replayed conversation
+# (Working Memory). Semantic ranks ABOVE Working Memory so a stored fact
+# ("User's name is Rafael") outranks a stale conversational turn, while the
+# current user input still overrides everything (recency preserved).
 PRIORITY_USER_INPUT = 100
 PRIORITY_SYSTEM_PROMPT = 95
-PRIORITY_WORKING_MEMORY = 90
-PRIORITY_SEMANTIC_MEMORY = 80
+PRIORITY_SEMANTIC_MEMORY = 90
+PRIORITY_WORKING_MEMORY = 80
 PRIORITY_TOOL_CONTEXT = 70
 PRIORITY_CHAT_HISTORY = 60
 
@@ -355,7 +360,7 @@ class ContextBudgetManager:
             sources.append(ContextSource(
                 name="candidate_facts",
                 content=cand_text,
-                priority=75,  # Between semantic memory (80) and tool (70)
+                priority=75,  # Between working memory (80) and tool (70)
                 learning_visible=False,
                 truncatable=True,
             ))

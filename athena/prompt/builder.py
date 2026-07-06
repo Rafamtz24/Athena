@@ -34,6 +34,15 @@ class PromptBuilder:
         "====================",
         "",
     )
+    # Recency-preserving authority note rendered inside the Knowledge section.
+    # Confirmed facts should outrank earlier conversation, but the user's most
+    # recent message always wins so corrections are accepted (not resisted).
+    _SEMANTIC_MEMORY_NOTE = (
+        "Confirmed facts about the user. Trust these over earlier "
+        "conversation, but the user's latest message always takes "
+        "precedence - if it contradicts a fact, accept the update.",
+        "",
+    )
     _HEADER_CANDIDATE_FACTS = (
         "====================",
         "",
@@ -119,6 +128,7 @@ class PromptBuilder:
                 lines.extend(self._TRAILING_NEWLINE)
             elif name == "semantic_memory":
                 lines.extend(self._HEADER_SEMANTIC_MEMORY)
+                lines.extend(self._SEMANTIC_MEMORY_NOTE)
                 lines.append(content)
                 lines.extend(self._TRAILING_NEWLINE)
             elif name == "candidate_facts":

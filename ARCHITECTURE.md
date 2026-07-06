@@ -65,7 +65,7 @@ athena/
 The Brain is the coordinator. It:
 - Creates and manages `Thought` objects
 - Owns shared managers (memory, knowledge)
-- Loads and persists Working Memory from `working_memory.json`
+- Resets Working Memory at the start of each session (see below), then persists the active window to `working_memory.json` during the session
 - Loads and persists Chat History from `chat_history.json`
 - Prunes Working Memory after each interaction via `WorkingMemory.prune()`
 - Does NOT perform reasoning itself
@@ -142,6 +142,8 @@ Two responsibilities:
 Working Memory is pruned twice per interaction:
 1. **In-pipeline** — The Context Budget Manager computes the budget and calls `prune()` before compiling the final package
 2. **Post-response** — `AthenaBrain._prune_to_budget()` delegates to `WorkingMemory.prune()` to persist the pruned history
+
+Working Memory is **session-scoped**: it is the sliding window of the *current* conversation, not long-term storage. Each session starts with an empty window (`AthenaBrain._reset_working_memory()`), so stale turns from prior sessions cannot replay and override durable facts. Anything meant to persist across sessions is captured in Semantic Memory by the learning pipeline.
 
 ### Memory System (`athena/memory/`)
 
@@ -238,12 +240,14 @@ User → AthenaBrain.process(message)
 
 ## Priority System (Context Budgeting)
 
+Authority order (high → low): the user's current message, then confirmed durable facts (Semantic Memory), then the replayed conversation (Working Memory). Semantic Memory ranks **above** Working Memory so a stored fact outranks a stale conversational turn, while User Input stays highest so corrections are always accepted (recency preserved).
+
 | Priority | Source | Behavior |
 |----------|--------|----------|
 | 100 | User Input | Never trimmed |
 | 95 | System Prompt | Never trimmed |
-| 90 | Working Memory | Never trimmed (but pre-pruned to budget) |
-| 80 | Semantic Memory | Not trimmed in current milestone |
+| 90 | Semantic Memory | Not trimmed in current milestone |
+| 80 | Working Memory | Never trimmed (but pre-pruned to budget) |
 | 70 | Tool Context | May be trimmed or truncated |
 | 60 | Chat History | May be trimmed or truncated |
 
