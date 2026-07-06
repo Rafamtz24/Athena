@@ -244,7 +244,14 @@ class HardwareDetector:
                 if vram_raw and vram_raw.isdigit():
                     val = int(vram_raw)
                     if val > 0:
-                        vram_bytes = val  # AdapterRAM is in bytes
+                        vram_bytes = val  # AdapterRAM is in bytes (caps at ~4 GB)
+
+                # AdapterRAM is a 32-bit WMI field and caps at ~4 GB, so any
+                # GPU with >=4 GB is misreported. Prefer the accurate 64-bit
+                # value from the registry when it is available.
+                registry_vram = HardwareDetector._detect_vram_registry(name)
+                if registry_vram is not None:
+                    vram_bytes = registry_vram
 
                 vendor = HardwareDetector._classify_gpu_vendor(name)
                 return GpuInfo(vendor=vendor, model=name, vram_bytes=vram_bytes)
@@ -252,6 +259,79 @@ class HardwareDetector:
         except (FileNotFoundError, subprocess.TimeoutExpired, ValueError, IndexError):
             pass
         return None
+
+    @staticmethod
+    def _detect_vram_registry(gpu_name: Optional[str] = None) -> Optional[int]:
+        """Read true dedicated VRAM (bytes) from the Windows registry.
+
+        ``Win32_VideoController.AdapterRAM`` is a 32-bit field that caps at
+        ~4 GB, so any GPU with >=4 GB of VRAM is misreported. The display
+        adapter registry key stores the real size as a 64-bit QWORD under
+        ``HardwareInformation.qwMemorySize``.
+
+        When ``gpu_name`` is provided, the value for the adapter whose
+        ``DriverDesc`` matches it is returned; otherwise the largest value
+        among physical adapters is used. Returns None when unavailable
+        (non-Windows, key/value missing, or registry access denied).
+        """
+        if platform.system() != "Windows":
+            return None
+        try:
+            import winreg
+        except ImportError:
+            return None
+
+        base = (
+            r"SYSTEM\CurrentControlSet\Control\Class"
+            r"\{4d36e968-e325-11ce-bfc1-08002be10318}"
+        )
+        candidates: list[tuple[str, int]] = []  # (adapter description, vram bytes)
+        try:
+            with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, base) as root:
+                index = 0
+                while True:
+                    try:
+                        subkey_name = winreg.EnumKey(root, index)
+                    except OSError:
+                        break
+                    index += 1
+                    if not subkey_name.isdigit():
+                        continue  # skip "Properties", "Configuration", etc.
+                    try:
+                        with winreg.OpenKey(root, subkey_name) as subkey:
+                            try:
+                                size, _ = winreg.QueryValueEx(
+                                    subkey, "HardwareInformation.qwMemorySize"
+                                )
+                            except FileNotFoundError:
+                                continue
+                            if not isinstance(size, int) or size <= 0:
+                                continue
+                            try:
+                                desc, _ = winreg.QueryValueEx(subkey, "DriverDesc")
+                            except FileNotFoundError:
+                                desc = ""
+                            if HardwareDetector._is_virtual_adapter(desc):
+                                continue
+                            candidates.append((desc, size))
+                    except OSError:
+                        continue
+        except OSError:
+            return None
+
+        if not candidates:
+            return None
+
+        # Prefer the adapter whose description matches the detected GPU name.
+        if gpu_name:
+            target = gpu_name.lower()
+            for desc, size in candidates:
+                lower_desc = desc.lower()
+                if lower_desc and (lower_desc in target or target in lower_desc):
+                    return size
+
+        # Otherwise fall back to the largest physical adapter's VRAM.
+        return max(size for _, size in candidates)
 
     @staticmethod
     def _is_virtual_adapter(name: str) -> bool:

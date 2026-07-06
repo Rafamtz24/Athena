@@ -240,11 +240,20 @@ def _get_gpu_info() -> str:
             driver = gpu.get("DriverVersion", "N/A")
             processor = gpu.get("VideoProcessor", "")
 
-            try:
-                vram_bytes = int(ram_raw)
-                vram_gb = vram_bytes / (1024 ** 3)
-                vram_str = f"{vram_gb:.1f} GB"
-            except (ValueError, TypeError):
+            # AdapterRAM is a 32-bit WMI field that caps at ~4 GB, so any GPU
+            # with >=4 GB is misreported. Prefer the accurate 64-bit VRAM from
+            # the registry (HardwareInformation.qwMemorySize), falling back to
+            # AdapterRAM only when the registry value is unavailable.
+            from athena.hardware.detector import HardwareDetector
+            vram_bytes = HardwareDetector._detect_vram_registry(name)
+            if vram_bytes is None:
+                try:
+                    vram_bytes = int(ram_raw)
+                except (ValueError, TypeError):
+                    vram_bytes = None
+            if vram_bytes:
+                vram_str = f"{vram_bytes / (1024 ** 3):.1f} GB"
+            else:
                 vram_str = "N/A"
 
             # Try to extract vendor from name
