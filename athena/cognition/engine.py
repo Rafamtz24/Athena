@@ -34,7 +34,12 @@ class CognitiveEngine:
         thought.metadata["cognitive_engine"] = "processed"
         if thought.get_response() is None:
             builder = PromptBuilder()
-            prompt = builder.build(thought)
+            reasoning_package = getattr(thought, 'reasoning_package', None)
+            if reasoning_package is not None:
+                prompt = builder.build(reasoning_package)
+            else:
+                # Fallback: build from raw thought (backward compatible)
+                prompt = builder._build_from_thought(thought)
             thought.trace["prompt"] = {
                 "text": prompt
             }

@@ -3,6 +3,7 @@ import sys
 sys.path.insert(0, '.')
 
 from athena.knowledge.manager import KnowledgeManager
+from athena.context.models import ContextSource, LearningContextPackage
 from athena.memory.working import WorkingMemory
 from athena.memory.manager import MemoryManager
 
@@ -18,9 +19,14 @@ def test_validate_knowledge_consumption():
     km = KnowledgeManager(working_memory=wm)
     km.provider = MockProvider()
 
-    # Step 1: Extract candidates (as done in _extract_candidates)
+    # Step 1: Extract candidates via LearningContextPackage
     conversation = "Hello\nI am Rafael"
-    extracted = km.extract_candidates(conversation)
+    package = LearningContextPackage(
+        sources=[ContextSource(name="conversation", content=conversation)],
+        conversation=conversation,
+        tool_context_content="",
+    )
+    extracted = km.extract_candidates(package)
     
     print(f"Extracted {len(extracted)} candidates from KnowledgeManager")
     

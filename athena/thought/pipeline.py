@@ -10,20 +10,21 @@ EventBus integration:
     - Events allow other modules to observe thought lifecycle without tight coupling
 
 Pipeline stages (in order):
-    1. _initialize()        — Set metadata, publish ThoughtCreated
-    2. _load_memory()       — Load episodic memories (Working Memory)
-    3. _load_knowledge()    — Retrieve Semantic Memory
-    4. _plan_tool()         — Tool Planner: decide if a tool is needed
-    5. _execute_tool()      — Tool Router: execute tool if needed
-    6. _reason()            — Publish ReasoningStarted
-    7. _plan()              — Publish PlanningStarted
-    8. _prepare_tools()     — Verify tool context, publish ToolsPrepared
-    9. CognitiveEngine      — Build prompt, call provider, set response
-    10. _build_response()   — Publish ResponseGenerated
-    11. _extract_candidates() — Extract knowledge candidates
-    12. _validate_knowledge() — Validate and promote to Semantic Memory
-    13. _reflect()          — Self-evaluate outcome
-    14. _finalize()         — Publish ThoughtCompleted
+    1. _initialize()            — Set metadata, publish ThoughtCreated
+    2. _load_memory()           — Load episodic memories (Working Memory)
+    3. _load_knowledge()        — Retrieve Semantic Memory
+    4. _plan_tool()             — Tool Planner: decide if a tool is needed
+    5. _execute_tool()          — Tool Router: execute tool if needed
+    6. _reason()                — Publish ReasoningStarted
+    7. _plan()                  — Publish PlanningStarted
+    8. _prepare_tools()         — Verify tool context, publish ToolsPrepared
+    9. _budget_context()        — Context Budget Manager: compile context packages
+    10. CognitiveEngine         — Build prompt from Reasoning Package, call provider
+    11. _build_response()       — Publish ResponseGenerated
+    12. _extract_candidates()   — Extract knowledge candidates from Learning Package
+    13. _validate_knowledge()   — Validate and promote to Semantic Memory
+    14. _reflect()              — Self-evaluate outcome
+    15. _finalize()             — Publish ThoughtCompleted
 """
 
 import sys
@@ -55,12 +56,13 @@ class ThoughtPipeline:
         6. _reason()            -> publishes ReasoningStarted
         7. _plan()              -> publishes PlanningStarted
         8. _prepare_tools()     -> publishes ToolsPrepared
-        9. CognitiveEngine      -> PromptBuilder + provider call
-        10. _build_response()   -> publishes ResponseGenerated
-        11. _extract_candidates() -> publishes CandidatesExtracted
-        12. _validate_knowledge() -> validates & promotes to Semantic Memory
-        13. _reflect()          -> publishes ReflectionStarted
-        14. _finalize()         -> publishes ThoughtCompleted
+        9. _budget_context()    -> publishes ContextBudgeted
+        10. CognitiveEngine     -> PromptBuilder + provider call
+        11. _build_response()   -> publishes ResponseGenerated
+        12. _extract_candidates() -> publishes CandidatesExtracted
+        13. _validate_knowledge() -> validates & promotes to Semantic Memory
+        14. _reflect()          -> publishes ReflectionStarted
+        15. _finalize()         -> publishes ThoughtCompleted
 
     Events published:
         - ThoughtCreated
@@ -133,6 +135,7 @@ class ThoughtPipeline:
             self._reason(thought)
             self._plan(thought)
             self._prepare_tools(thought)      # Verify tool context, publish event
+            self._budget_context(thought)     # Context Budget Manager (NEW)
             engine = CognitiveEngine(self.provider)
             thought = engine.process(thought)
             self._build_response(thought)
@@ -366,28 +369,95 @@ class ThoughtPipeline:
         )
         bus.publish(event)
 
-    def _extract_candidates(self, thought: Thought) -> None:
-        """Stage 3a: Extract knowledge candidates from the completed conversation.
+    def _budget_context(self, thought: Thought) -> None:
+        """Stage 8b: Run the Context Budget Manager.
 
-        Passes tool context content (if present) so the extractor can learn
-        stable hardware facts while rejecting transient runtime values.
+        Two-phase process:
+        Phase 1: Compute Working Memory budget and prune if needed.
+        Phase 2: Compile final Reasoning and Learning packages.
+
+        Working Memory is pruned BEFORE compilation so the final packages
+        always fit within the provider's context window.
+        """
+        from athena.context.manager import ContextBudgetManager
+
+        budget_manager = ContextBudgetManager(self.provider)
+        try:
+            # ── Phase 1: Compute WM budget and prune ──
+            wm_budget = budget_manager.compute_wm_budget(thought)
+            if self.memory_manager is not None:
+                self.memory_manager.working_memory.prune(
+                    wm_budget, entries=thought.history
+                )
+
+            # ── Phase 2: Compile final packages ──
+            reasoning_package, learning_package = budget_manager.compile(thought)
+            thought.reasoning_package = reasoning_package
+            thought.learning_package = learning_package
+            thought.metadata["context_budget"] = {
+                "total_tokens": reasoning_package.total_tokens,
+                "generation_budget": reasoning_package.generation_budget,
+                "context_window": reasoning_package.context_window,
+                "trimmed_sources": reasoning_package.trimmed_sources,
+                "wm_budget": wm_budget,
+            }
+        except Exception:
+            exc_type, exc_value, exc_tb = sys.exc_info()
+            tb_str = "".join(traceback.format_exception(exc_type, exc_value, exc_tb))
+            print(f"\n[PIPELINE TRACE] budget_context exception:")
+            print(f"[PIPELINE TRACE] Exception type: {exc_type.__name__}")
+            print(f"[PIPELINE TRACE] Exception message: {exc_value}")
+            print(f"[PIPELINE TRACE] Full traceback:\n{tb_str}")
+            thought.trace["budget_context_error"] = {
+                "exception_type": exc_type.__name__,
+                "exception_message": str(exc_value),
+                "traceback": tb_str,
+            }
+            # Fallback: create minimal packages so pipeline can continue
+            thought.reasoning_package = None
+            thought.learning_package = None
+
+        thought.metadata["stage"] = "context_budgeted"
+        bus = get_event_bus()
+        event = Event(
+            type="ContextBudgeted",
+            source="thought_pipeline",
+            payload={"user_input": thought.user_input},
+            metadata={"stage": "context_budgeted"},
+        )
+        bus.publish(event)
+
+    def _extract_candidates(self, thought: Thought) -> None:
+        """Stage 3a: Extract knowledge candidates from the Learning Package.
+
+        Passes the LearningContextPackage directly to the KnowledgeManager.
+        The Context Budget Manager has already determined which context
+        sources are visible for learning. The KnowledgeManager builds its
+        extraction prompt exclusively from the package contents.
         """
         if self.knowledge_manager is not None:
-            # Use full conversation context (history + current input + assistant response) for extraction
-            # Include history + user input + assistant response so extractor can learn from the complete interaction
-            parts = list(thought.history) if thought.history else []
-            parts.append(f"User: {thought.user_input}")
-            if thought.response:
-                parts.append(f"Assistant: {thought.response}")
-            conversation = "\n".join(parts) if parts else thought.user_input
-
-            # Get tool context content if present
-            tool_context_content = ""
-            tool_context = getattr(thought, 'tool_context', None)
-            if tool_context is not None and tool_context.content:
-                tool_context_content = tool_context.content
-
-            self.knowledge_manager.extract_candidates(conversation, tool_context_content)
+            learning_package = getattr(thought, 'learning_package', None)
+            if learning_package is not None:
+                # Pass the pre-budgeted Learning Package directly
+                self.knowledge_manager.extract_candidates(learning_package)
+            else:
+                # Fallback: create a minimal package from thought directly
+                from athena.context.models import ContextSource, LearningContextPackage
+                parts = list(thought.history) if thought.history else []
+                parts.append(f"User: {thought.user_input}")
+                if thought.response:
+                    parts.append(f"Assistant: {thought.response}")
+                conversation = "\n".join(parts) if parts else thought.user_input
+                tool_context_content = ""
+                tool_context = getattr(thought, 'tool_context', None)
+                if tool_context is not None and tool_context.content:
+                    tool_context_content = tool_context.content
+                fallback_package = LearningContextPackage(
+                    sources=[ContextSource(name="fallback", content=conversation)],
+                    conversation=conversation,
+                    tool_context_content=tool_context_content,
+                )
+                self.knowledge_manager.extract_candidates(fallback_package)
         
         thought.metadata["stage"] = "candidates_extracted"
         bus = get_event_bus()

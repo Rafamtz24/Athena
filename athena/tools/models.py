@@ -20,9 +20,13 @@ class ToolContext:
         tool_name: Identifier for the tool (e.g., "system", "web", "document").
         content: The rendered context string to be injected into the prompt.
         prompt: The user's prompt or query for this tool instance.
+        priority: Priority level for context budgeting (default 70 for tools).
+        learning_visible: Whether this context is visible to the Knowledge Extractor.
         metadata: Additional tool-specific information.
     """
     tool_name: str = ""
     content: str = ""
     prompt: str = ""
+    priority: int = 70
+    learning_visible: bool = True
     metadata: dict = field(default_factory=dict)

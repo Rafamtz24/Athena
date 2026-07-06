@@ -57,3 +57,37 @@ class LMStudioProvider:
     def call(self, prompt: str) -> str:
         """Alias for generate() to match KnowledgeManager expectations."""
         return self.generate(prompt)
+
+    def count_tokens(self, text: str) -> int:
+        """Count tokens using a character-based heuristic.
+
+        LM Studio does not expose a tokenizer endpoint, so we use the
+        standard heuristic: len(text) // 4.
+
+        Args:
+            text: The text to estimate token count for.
+
+        Returns:
+            Estimated token count.
+        """
+        return len(text) // 4
+
+    def get_context_window(self) -> int:
+        """Get the default context window size.
+
+        LM Studio does not expose context window via API.
+        Returns a conservative default. Override in settings if needed.
+
+        Returns:
+            The default context window in tokens (4096).
+        """
+        from athena.config.settings import get_settings
+        # Check if a custom context window is configured via inference config
+        try:
+            from athena.hardware import HardwareDetector
+            from athena.config.inference import AutoConfigurator
+            hardware = HardwareDetector().detect()
+            config = AutoConfigurator().configure(hardware)
+            return config.n_ctx
+        except Exception:
+            return 4096

@@ -67,8 +67,56 @@ class WorkingMemory:
         for i, entry in enumerate(self._entries):
             if entry.metadata.get("type") == "candidate":
                 candidate_indices.append(i)
-        
+
         if 0 <= index < len(candidate_indices):
             self._entries.pop(candidate_indices[index])
             return True
         return False
+
+    def prune(self, max_tokens: int, entries: list = None) -> None:
+        """Remove oldest entries until total token count fits within max_tokens.
+
+        Working Memory is responsible for maintaining its own sliding window.
+        This method removes entries from the BEGINNING (oldest first) until
+        the cumulative token count of the remaining entries fits within the
+        specified budget.
+
+        Uses a deterministic token estimate of len(text) // 4 (same heuristic
+        as the brain's _prune_to_budget). The Context Budget Manager performs
+        exact token counting via the provider when compiling the final package.
+
+        Args:
+            max_tokens: Maximum total token count allowed.
+            entries: List of string entries to prune in-place. If None,
+                     prunes self._entries (MemoryEntry objects).
+        """
+        if max_tokens <= 0:
+            if entries is not None:
+                entries.clear()
+            else:
+                self._entries.clear()
+            return
+
+        # Determine which list to prune
+        target = entries if entries is not None else self._entries
+        if not target:
+            return
+
+        def estimate_tokens(text: str) -> int:
+            """Estimate token count from text length."""
+            if isinstance(text, str):
+                return len(text) // 4
+            # Handle MemoryEntry or other objects
+            content = getattr(text, 'content', str(text))
+            return len(str(content)) // 4
+
+        # Walk from newest (end) to oldest (start), accumulating tokens
+        total = 0
+        for i in range(len(target) - 1, -1, -1):
+            total += estimate_tokens(target[i])
+            if total > max_tokens:
+                # Entries 0..i exceed budget; keep i+1..end
+                del target[:i + 1]
+                return
+
+        # All entries fit — no change needed

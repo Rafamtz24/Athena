@@ -55,6 +55,8 @@ class Thought:
     tool_results: list = field(default_factory=list)
     tool_context: Optional[ToolContext] = None
     planner_decision: Optional[PlannerDecision] = None
+    reasoning_package: Any = None
+    learning_package: Any = None
     response: Any = None
     reflection: Any = None
     metadata: dict = field(default_factory=dict)

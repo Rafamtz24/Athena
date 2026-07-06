@@ -48,3 +48,34 @@ class LLMProvider(ABC):
             NotImplementedError: If not implemented by subclass.
         """
         raise NotImplementedError  # pragma: no cover
+
+    @abstractmethod
+    def count_tokens(self, text: str) -> int:
+        """
+        Count the number of tokens in the given text using the provider's
+        native tokenizer.
+
+        Args:
+            text: The text to tokenize and count.
+
+        Returns:
+            The number of tokens in the text.
+
+        Raises:
+            NotImplementedError: If not implemented by subclass.
+        """
+        raise NotImplementedError  # pragma: no cover
+
+    @abstractmethod
+    def get_context_window(self) -> int:
+        """
+        Get the maximum context window size in tokens for this provider.
+
+        Returns:
+            The maximum number of tokens the model can accept as input
+            (prompt + generation combined).
+
+        Raises:
+            NotImplementedError: If not implemented by subclass.
+        """
+        raise NotImplementedError  # pragma: no cover

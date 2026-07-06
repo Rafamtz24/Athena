@@ -105,31 +105,35 @@ class AthenaBrain:
         self._write_chat_history(entries)
 
     def _prune_to_budget(self) -> None:
-        """Remove oldest entries from working_memory.json if they exceed csize.
+        """Remove oldest entries from working_memory.json if they exceed budget.
 
-        Uses the same token estimation as PromptBuilder: len(text) // 4.
-        Only modifies the in-memory self.history and working_memory.json.
-        chat_history.json is NEVER modified.
+        Delegates to WorkingMemory.prune() which handles the sliding-window
+        eviction logic. The Context Budget Manager computes the dynamic budget
+        during the pipeline; this method applies it to persist working_memory.json.
         """
-        csize = get_settings().prompt.csize
+        # Use the provider-computed budget when available, else fall back to
+        # the static csize setting (backward compatible).
+        try:
+            context_window = self.provider.get_context_window()
+            gen_ratio = getattr(get_settings().budget, 'generation_reserve_ratio', 0.25)
+            gen_budget = max(256, int(context_window * gen_ratio))
+            prompt_budget = context_window - gen_budget
+            # Use a generous default: WM gets 40% of prompt budget as fallback
+            csize = max(1024, int(prompt_budget * 0.40) * 4)
+        except Exception:
+            csize = get_settings().prompt.csize
+
         if csize <= 0:
             self.history = []
             self._write_working_memory()
             return
 
-        def estimate_tokens(text: str) -> int:
-            return len(text) // 4
+        # Delegate to WorkingMemory.prune() for the eviction logic
+        self.memory_manager.working_memory.prune(
+            max_tokens=csize // 4,
+            entries=self.history,
+        )
 
-        total = 0
-        for i in range(len(self.history) - 1, -1, -1):
-            total += estimate_tokens(self.history[i])
-            if total > csize:
-                # Entries 0..i exceed budget; keep i+1..end
-                self.history = list(self.history[i + 1:])
-                self._write_working_memory()
-                return
-
-        # All entries fit — no change needed
         self._write_working_memory()
 
     def _write_working_memory(self) -> None:

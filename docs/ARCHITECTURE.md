@@ -1,4 +1,14 @@
-# Athena Architecture Proposal
+# Athena Architecture Proposal (Historical)
+
+> **Note**: This document describes an earlier design proposal and does **not** reflect the current Athena implementation.
+> For the current architecture, see [ARCHITECTURE.md](../ARCHITECTURE.md).
+>
+> The current implementation uses a `Thought`-based cognitive pipeline, not the module/plugin system described below.
+> Tool execution uses a Planner → Router → ToolContext pattern, not JSON Schema validation.
+> Memory uses Episodic, Semantic, and Working types, not short_term/long_term.
+> The current architecture is documented in `athena/` source code and the root `ARCHITECTURE.md`.
+
+# Athena Architecture Proposal (Historical)
 
 ## 1. Design Goals
 

@@ -66,6 +66,15 @@ class PromptSettings:
 
 
 @dataclass(frozen=False)
+class BudgetSettings:
+    """Settings for the Context Budget Manager."""
+
+    # Fraction of the context window reserved for model generation output.
+    # The prompt will use (1 - generation_reserve_ratio) of the window.
+    generation_reserve_ratio: float = 0.25
+
+
+@dataclass(frozen=False)
 class PerformanceSettings:
     """Settings for inference performance tuning."""
 
@@ -104,6 +113,7 @@ class AppSettings:
     learning: LearningSettings = field(default_factory=LearningSettings)
     web_search: WebSearchSettings = field(default_factory=WebSearchSettings)
     prompt: PromptSettings = field(default_factory=PromptSettings)
+    budget: BudgetSettings = field(default_factory=BudgetSettings)
 
     def __post_init__(self):
         """Validate settings after initialization."""

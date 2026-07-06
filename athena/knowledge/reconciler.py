@@ -27,8 +27,10 @@ import logging
 import re
 from typing import List, Tuple
 
+from athena.knowledge.attributes import parse_fact
 from athena.knowledge.models import KnowledgeCandidate
 from athena.memory.semantic import SemanticMemory
+from athena.prompt.loader import PromptLoader
 
 logger = logging.getLogger(__name__)
 
@@ -36,6 +38,25 @@ logger = logging.getLogger(__name__)
 # ──────────────────────────────────────────────────────────────
 # Dedicated prompt builder (isolated from reconciliation logic)
 # ──────────────────────────────────────────────────────────────
+
+# PERFORMANCE: The reconciliation profile (rules, examples, response
+# format) is loaded from athena/prompts/reconciliation.json once at
+# import time, and the static prefix/suffix strings are precomputed
+# here so build_reconciliation_prompt() only has to join the dynamic
+# candidate/existing-entry pair on every call.
+_RECONCILIATION_PROFILE = PromptLoader.load("reconciliation")
+
+_RECONCILIATION_PROMPT_PREFIX = (
+    _RECONCILIATION_PROFILE.system_prompt
+    + "\n\n"
+    + _RECONCILIATION_PROFILE.rules
+    + "\n\n=== NOW CLASSIFY THIS PAIR ===\n\n"
+)
+
+_RECONCILIATION_PROMPT_SUFFIX = (
+    "\n\n" + _RECONCILIATION_PROFILE.response_format
+)
+
 
 def build_reconciliation_prompt(
     candidate_statement: str,
@@ -53,70 +74,30 @@ def build_reconciliation_prompt(
 
     This function is isolated so the prompt can evolve independently
     from the reconciliation algorithm.
+
+    PERFORMANCE: Static rules/examples/response-format are precomputed
+    into _RECONCILIATION_PROMPT_PREFIX / _RECONCILIATION_PROMPT_SUFFIX.
+    Only the dynamic pair and additional entries are constructed per call.
     """
-    lines = [
-        "You compare pairs of factual statements about a user. ",
-        "For each pair, decide if they are IDENTICAL, CONTRADICTORY, or UNRELATED.",
-        "",
-        "=== RULES ===",
-        "",
-        "Two facts are IDENTICAL (DUPLICATE) if:",
-        "- They describe the exact same attribute of the same subject",
-        "- AND they give the same value for that attribute",
-        'Example: "User name is Rafael" and "User name is Rafael"',
-        "",
-        "Two facts are CONTRADICTORY (CONFLICT) if:",
-        "- They describe the SAME attribute of the SAME subject",
-        "- BUT they give DIFFERENT, incompatible values",
-        'Example: "User name is Rafael" vs "User name is Pedro"',
-        '  -> BOTH describe the "name" attribute of "User"',
-        '  -> Rafael != Pedro, so they CONFLICT',
-        'Example: "User favorite color is blue" vs "User favorite color is red"',
-        '  -> BOTH describe "favorite color" of "User"',
-        '  -> blue != red, so they CONFLICT',
-        'Example: "User lives in New York" vs "User lives in Chicago"',
-        '  -> BOTH describe "city" of "User"',
-        '  -> New York != Chicago, so they CONFLICT',
-        "",
-        "Two facts are UNRELATED (DIFFERENT) if:",
-        "- They describe DIFFERENT attributes (even of the same subject)",
-        'Example: "User name is Rafael" vs "User has a dog named Gemma"',
-        '  -> "name" and "dog" are different attributes -> UNRELATED',
-        'Example: "User favorite color is blue" vs "User lives in Paris"',
-        '  -> "favorite color" and "lives in" are different -> UNRELATED',
-        "",
-        "=== NOW CLASSIFY THIS PAIR ===",
-        "",
-        f'EXISTING: "{existing_contents[0] if existing_contents else "(none)"}"',
+    # Build the dynamic pair section
+    first_existing = existing_contents[0] if existing_contents else "(none)"
+    pair_lines = [
+        f'EXISTING: "{first_existing}"',
         f'NEW:      "{candidate_statement}"',
-        "",
-        "Based on the RULES above, which category fits?",
-        "",
-        "=== RESPONSE ===",
-        "Reply with EXACTLY two lines. No extra text. No explanations.",
-        "",
-        "If IDENTICAL:",
-        "ACTION: DUPLICATE",
-        "MATCHES:",
-        '- "exact text of the matching existing fact"',
-        "",
-        "If CONTRADICTORY:",
-        "ACTION: CONFLICT",
-        "CONFLICTS:",
-        '- "exact text of the conflicting existing fact"',
-        "",
-        "If UNRELATED:",
-        "ACTION: DIFFERENT",
     ]
 
     # Add remaining existing entries (if any) as additional context
     if existing_contents and len(existing_contents) > 1:
-        lines.append("")
-        lines.append("NOTE - Other existing entries (for context, not the main pair):")
+        pair_lines.append("")
+        pair_lines.append("NOTE - Other existing entries (for context, not the main pair):")
         for i, content in enumerate(existing_contents[1:], 2):
-            lines.append(f'  {i}. "{content}"')
+            pair_lines.append(f'  {i}. "{content}"')
 
-    return "\n".join(lines)
+    return (
+        _RECONCILIATION_PROMPT_PREFIX
+        + "\n".join(pair_lines)
+        + _RECONCILIATION_PROMPT_SUFFIX
+    )
 
 
 # ──────────────────────────────────────────────────────────────
@@ -285,6 +266,63 @@ class MemoryReconciler:
 
     # ── Internal: reconcile a single candidate ─────────────────
 
+    def _learn_candidate(
+        self,
+        candidate: KnowledgeCandidate,
+        semantic_memory: SemanticMemory,
+    ) -> None:
+        """Persist a candidate as a new Semantic Memory entry."""
+        semantic_memory.learn(candidate.statement, {
+            "type": "knowledge",
+            "confidence": candidate.confidence,
+            "category": candidate.category,
+        })
+
+    def _reconcile_by_attribute(
+        self,
+        candidate: KnowledgeCandidate,
+        semantic_memory: SemanticMemory,
+        existing_entries: list,
+    ) -> str | None:
+        """Deterministic reconciliation for recognized single-valued attributes.
+
+        Model-independent fast path: if the candidate parses into a known
+        single-valued attribute (name, location, ...), compare it against
+        existing entries for the SAME (subject, attribute):
+            - same value        -> 'duplicates' (no change)
+            - different value(s) -> 'conflicts'  (remove old, insert new)
+            - no existing value  -> 'new_facts'  (insert)
+
+        Returns the outcome string, or None if the candidate is not a
+        recognized single-valued attribute (defer to the LLM reconciler).
+        """
+        new_fact = parse_fact(candidate.statement)
+        if new_fact is None:
+            return None
+
+        # Collect existing entries describing the same attribute of the same subject.
+        same_attribute: list = []
+        for entry in existing_entries:
+            existing_fact = parse_fact(str(getattr(entry, 'content', entry)))
+            if existing_fact is not None and existing_fact.key == new_fact.key:
+                same_attribute.append((entry, existing_fact))
+
+        if not same_attribute:
+            self._learn_candidate(candidate, semantic_memory)
+            return 'new_facts'
+
+        # Already stored with the same value → duplicate, no change.
+        if any(f.value_norm == new_fact.value_norm for _, f in same_attribute):
+            return 'duplicates'
+
+        # Same attribute, different value(s) → conflict: newer value wins.
+        for entry, _ in same_attribute:
+            entry_id = getattr(entry, 'id', None)
+            if entry_id:
+                semantic_memory.remove(entry_id)
+        self._learn_candidate(candidate, semantic_memory)
+        return 'conflicts'
+
     def _reconcile_one(
         self,
         candidate: KnowledgeCandidate,
@@ -299,12 +337,17 @@ class MemoryReconciler:
 
         # ── Edge case: empty Semantic Memory ──
         if not existing_entries:
-            semantic_memory.learn(candidate.statement, {
-                "type": "knowledge",
-                "confidence": candidate.confidence,
-                "category": candidate.category,
-            })
+            self._learn_candidate(candidate, semantic_memory)
             return 'new_facts'
+
+        # ── Deterministic fast path (model-independent) ──
+        # Single-valued attributes (name, location, ...) are reconciled without
+        # an LLM call, so conflict detection is reliable on any reasoning model.
+        deterministic = self._reconcile_by_attribute(
+            candidate, semantic_memory, existing_entries
+        )
+        if deterministic is not None:
+            return deterministic
 
         # ── Build prompt with ALL existing entries ──
         existing_contents = [
@@ -350,20 +393,12 @@ class MemoryReconciler:
                         semantic_memory.remove(entry_id)
 
             # Insert the new candidate (newer fact wins)
-            semantic_memory.learn(candidate.statement, {
-                "type": "knowledge",
-                "confidence": candidate.confidence,
-                "category": candidate.category,
-            })
+            self._learn_candidate(candidate, semantic_memory)
             return 'conflicts'
 
         # DIFFERENT: insert as new knowledge
         if action == 'DIFFERENT':
-            semantic_memory.learn(candidate.statement, {
-                "type": "knowledge",
-                "confidence": candidate.confidence,
-                "category": candidate.category,
-            })
+            self._learn_candidate(candidate, semantic_memory)
             return 'new_facts'
 
         # Unknown action — do NOT modify SM

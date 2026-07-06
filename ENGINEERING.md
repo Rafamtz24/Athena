@@ -82,21 +82,20 @@ Do not over-engineer.
 
 ## Current Core Architecture
 
-Brain
-
-Thought
-
-Thought Pipeline
-
-Memory
-
-Events
-
-Future Cognitive Engine
-
-Future Providers
-
-Future Tools
+- Brain (`brain/brain.py`) — Coordinates the cognitive pipeline
+- Thought (`thought/models.py`) — Temporary cognitive workspace
+- Thought Pipeline (`thought/pipeline.py`) — 15-stage processing pipeline
+- Cognitive Engine (`cognition/engine.py`) — PromptBuilder + LLM provider
+- Context Budget Manager (`context/manager.py`) — Compiles budgeted context packages
+- Memory (`memory/`) — Episodic, Semantic, Working
+- Knowledge System (`knowledge/`) — Extraction, Validation, Reconciliation
+- Tool Planner (`planner/planner.py`) — Decides if a tool is needed
+- Tool Router (`tools/router.py`) — Executes tools, produces ToolContext
+- Providers (`providers/`) — LlamaCpp, LM Studio (swappable via config)
+- PromptBuilder (`prompt/builder.py`) — Renders ReasoningContextPackage
+- Event Bus (`events/bus.py`) — Publish-subscribe for module communication
+- Hardware Detector (`hardware/detector.py`) — Auto-detects CPU/GPU/RAM
+- Debug Manager (`debug/manager.py`) — Debug utilities
 
 ## Definition of Done
 
