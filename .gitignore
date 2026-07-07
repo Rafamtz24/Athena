@@ -10,3 +10,6 @@ venv/
 .vscode/
 .idea/
 models/*.gguf
+
+# Local book PDFs for reading mode (copyright / size) — keep the folder, not the files
+books/*.pdf

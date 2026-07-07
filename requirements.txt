@@ -1,0 +1,18 @@
+# Athena runtime dependencies.
+# Pinned to the versions currently in use; adjust as needed.
+
+# Local GGUF model inference
+llama-cpp-python==0.3.32
+
+# Hardware detection (CPU/RAM/GPU) and system snapshots
+psutil==7.2.2
+py-cpuinfo==9.0.0
+
+# HTTP (LM Studio provider, web search)
+requests==2.34.2
+
+# Web search tool
+duckduckgo-search==8.1.1
+
+# Book reading mode (/book) — PDF text extraction
+pypdf==6.14.2

@@ -167,6 +167,14 @@ Two-phase knowledge pipeline:
 - Current tools: `/system` (System Snapshot), `/web` (Web Search via DuckDuckGo), `weather` (current conditions via wttr.in — a keyless weather source, so weather queries return real values instead of search snippets).
 - **Query routing note:** thermal terms are disambiguated by context — "cpu temperature" is a system check, "temperature outside" is weather. Live/external topics (weather, prices, news) are never satisfied from memory, so a stored fact that merely overlaps the query (e.g. the user's city) never suppresses the lookup.
 
+### Reading Mode (`athena/books/`)
+
+A **separate, pipeline-free path** for answering questions grounded strictly in a local PDF. Entered from the console with `/book`.
+
+- Books live in the `books/` directory (`storage.books_path`). `list_books()` discovers PDFs; the user selects one by number.
+- The selected PDF is extracted (`pypdf`) and split into overlapping word-window chunks. Because a book far exceeds the context window, only the passages most relevant to each question (keyword-scored) are injected — retrieval, not whole-book injection.
+- `AthenaBrain.answer_from_book()` bypasses the Thought pipeline entirely: **no tools, no memory retrieval/injection, no knowledge extraction**. It sends the retrieved passages with the strict `book` prompt profile ("answer only from these excerpts") directly to the provider.
+
 ### Providers (`athena/providers/`)
 
 All providers implement `LLMProvider` (abstract base):

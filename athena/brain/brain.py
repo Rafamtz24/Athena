@@ -59,6 +59,24 @@ class AthenaBrain:
         self._reset_working_memory()
         self._load_chat_history()
 
+    def answer_from_book(self, chunks: list, question: str) -> str:
+        """Answer a question grounded strictly in a selected book (reading mode).
+
+        This is a SEPARATE path from process(): it does not run the Thought
+        pipeline, and therefore uses no tools, performs no memory retrieval or
+        injection, and extracts no knowledge. Only the book's contents inform
+        the answer.
+        """
+        from athena.books.library import answer_from_book as _answer_from_book
+
+        try:
+            return _answer_from_book(self.provider, chunks, question)
+        except Exception:
+            exc_type, exc_value, exc_tb = sys.exc_info()
+            tb_str = "".join(traceback.format_exception(exc_type, exc_value, exc_tb))
+            print(f"\n[BOOK] answer_from_book failed:\n{tb_str}")
+            return "I'm sorry, I ran into a problem reading from this book."
+
     def _ensure_storage_dir(self) -> None:
         """Create the data directory if it does not exist."""
         _WORKING_MEM_PATH.parent.mkdir(parents=True, exist_ok=True)

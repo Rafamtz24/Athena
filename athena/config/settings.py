@@ -30,6 +30,7 @@ class StorageSettings:
     working_memory_path: str = "data/working_memory.json"
     chat_history_path: str = "data/chat_history.json"
     semantic_memory_path: str = "data/semantic_memory.json"
+    books_path: str = "books"
 
 
 @dataclass(frozen=False)

@@ -9,6 +9,7 @@ Usage:
 Commands:
     /context size           Display current conversation context size
     /context size <value>   Update conversation context size immediately
+    /book                   Enter reading mode (answer from a selected PDF)
     exit, quit              Leave the chat
 
 Exit by typing: exit or quit
@@ -57,6 +58,80 @@ def _handle_command(user_input: str) -> str:
     return "unknown"
 
 
+def _reading_mode(brain: AthenaBrain) -> None:
+    """Enter book reading mode: select a PDF, then answer questions from it.
+
+    In this mode Athena's normal pipeline is bypassed entirely — no tools, no
+    memory retrieval/injection, no knowledge extraction. Answers come only from
+    the selected book's contents.
+    """
+    from athena.books.library import chunk_text, extract_text, list_books
+
+    books = list_books()
+    if not books:
+        print(
+            "\nNo books found. Place one or more PDF files in the 'books' "
+            "folder and try again.\n"
+        )
+        return
+
+    print("\n=== Reading Mode ===")
+    print("Available books:")
+    for index, book in enumerate(books, start=1):
+        print(f"  {index}. {book.stem}")
+    print("  0. Cancel")
+
+    # ── Select a book ──
+    selected = None
+    while selected is None:
+        try:
+            choice = input("\nSelect a book by number: ").strip()
+        except (EOFError, KeyboardInterrupt):
+            print()
+            return
+        if choice == "0" or choice.lower() in ("exit", "quit", "cancel"):
+            print("Left reading mode.\n")
+            return
+        if choice.isdigit() and 1 <= int(choice) <= len(books):
+            selected = books[int(choice) - 1]
+        else:
+            print("Invalid selection. Enter a listed number (or 0 to cancel).")
+
+    # ── Load & chunk the book ──
+    print(f"\nLoading '{selected.stem}'...")
+    try:
+        text = extract_text(selected)
+    except Exception as exc:
+        print(f"Failed to read the PDF: {exc}\n")
+        return
+    chunks = chunk_text(text)
+    if not chunks:
+        print(
+            "Could not extract any text from this PDF. It may be a scanned "
+            "(image-only) document.\n"
+        )
+        return
+
+    print(f"Loaded '{selected.stem}' ({len(chunks)} passages).")
+    print("Ask questions about this book. Type /exit to leave reading mode.\n")
+
+    # ── Question loop ──
+    while True:
+        try:
+            question = input(f"[{selected.stem}] > ").strip()
+        except (EOFError, KeyboardInterrupt):
+            print()
+            break
+        if not question:
+            continue
+        if question.lower() in ("/exit", "/close", "/book", "exit", "quit"):
+            break
+        answer = brain.answer_from_book(chunks, question)
+        print(f"\n{answer}\n")
+
+    print("Left reading mode.\n")
+
+
 def main() -> None:
     brain = AthenaBrain()
 
@@ -73,6 +148,11 @@ def main() -> None:
         stripped = user_input.strip()
         if stripped.lower() in ("exit", "quit"):
             break
+
+        # /book — enter reading mode (separate, pipeline-free book QA)
+        if stripped.lower() == "/book":
+            _reading_mode(brain)
+            continue
 
         # Handle terminal commands
         if stripped.startswith("/"):
