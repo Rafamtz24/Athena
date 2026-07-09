@@ -43,16 +43,20 @@ class AthenaBrain:
 
         self.debug_manager = DebugManager()
         self.provider = ProviderFactory.create()
+        # Dedicated (usually smaller / faster) model for the learning pipeline.
+        # Falls back to the reasoning provider if no learning model is present.
+        self.learning_provider = ProviderFactory.create_learning(self.provider)
         self.memory_manager = MemoryManager()
         self.knowledge_manager = KnowledgeManager(
             working_memory=self.memory_manager.working_memory,
-            provider=self.provider,
+            provider=self.learning_provider,
             memory_manager=self.memory_manager
         )
         self.pipeline = ThoughtPipeline(
             self.memory_manager,
             self.knowledge_manager,
             self.provider,
+            learning_provider=self.learning_provider,
         )
         self.history: list[str] = []  # Active conversation context (may be pruned)
         self._ensure_storage_dir()
@@ -76,6 +80,25 @@ class AthenaBrain:
             tb_str = "".join(traceback.format_exception(exc_type, exc_value, exc_tb))
             print(f"\n[BOOK] answer_from_book failed:\n{tb_str}")
             return "I'm sorry, I ran into a problem reading from this book."
+
+    def tarot_reading(self, question: str, reading: dict) -> str:
+        """Interpret an already-drawn tarot spread (tarot mode).
+
+        Like answer_from_book, this is a SEPARATE path from process(): it does
+        not run the Thought pipeline and therefore uses no tools, no web search,
+        no memory retrieval/injection, and extracts no knowledge. The cards are
+        drawn beforehand by a system RNG (see athena.tarot.reading); the model
+        only interprets what chance dealt.
+        """
+        from athena.tarot.reading import interpret as _interpret
+
+        try:
+            return _interpret(self.provider, question, reading)
+        except Exception:
+            exc_type, exc_value, exc_tb = sys.exc_info()
+            tb_str = "".join(traceback.format_exception(exc_type, exc_value, exc_tb))
+            print(f"\n[TAROT] tarot_reading failed:\n{tb_str}")
+            return "I'm sorry, I ran into a problem completing this reading."
 
     def _ensure_storage_dir(self) -> None:
         """Create the data directory if it does not exist."""
@@ -168,7 +191,7 @@ class AthenaBrain:
         """Save working memory to disk (backward-compatible alias)."""
         self._write_working_memory()
 
-    async def process(self, message: str) -> str:
+    async def process(self, message: str, on_answer=None) -> str:
         """
         Process a message through the Athena brain pipeline.
 
@@ -197,7 +220,7 @@ class AthenaBrain:
 
         # Process through the pipeline with full exception isolation
         try:
-            await self.pipeline.process(thought)
+            await self.pipeline.process(thought, on_response=on_answer)
         except Exception:
             exc_type, exc_value, exc_tb = sys.exc_info()
             tb_str = "".join(traceback.format_exception(exc_type, exc_value, exc_tb))

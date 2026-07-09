@@ -30,12 +30,18 @@ class InferenceConfiguration:
         n_batch:     Batch size for prompt processing.
         n_ctx:       Maximum context window size in tokens.
         backend:     Inference backend string (CPU / CUDA / HIP / Vulkan).
+        flash_attn:  Enable Flash Attention (faster, lower KV-cache memory).
+                     Defaults OFF: it is only reliable on CUDA. On the Vulkan
+                     backend (AMD / Intel) llama.cpp's flash-attention can hang
+                     the GPU and trigger a driver timeout, so AutoConfigurator
+                     enables it only when the backend is CUDA.
     """
     gpu_layers: int = 0
     n_threads: int = 4
     n_batch: int = 512
     n_ctx: int = 4096
     backend: str = "CPU"
+    flash_attn: bool = False
 
 
 # ---------------------------------------------------------------------------
@@ -106,12 +112,18 @@ class AutoConfigurator:
         # --- Context size ----------------------------------------------
         n_ctx = AutoConfigurator._pick_context_size(ram, mode)
 
+        # --- Flash attention -------------------------------------------
+        # Only enable on CUDA, where it is stable. On Vulkan (AMD / Intel) it
+        # can hang the GPU and cause a driver timeout, so leave it off there.
+        flash_attn = backend == "CUDA"
+
         return InferenceConfiguration(
             gpu_layers=gpu_layers,
             n_threads=n_threads,
             n_batch=n_batch,
             n_ctx=n_ctx,
             backend=backend,
+            flash_attn=flash_attn,
         )
 
     # ------------------------------------------------------------------

@@ -10,6 +10,12 @@ venv/
 .vscode/
 .idea/
 models/*.gguf
+# Model weights also live in per-model subfolders (models/reason, models/learning);
+# they are large and machine-specific, so ignore everything under models/.
+models/
 
 # Local book PDFs for reading mode (copyright / size) — keep the folder, not the files
 books/*.pdf
+
+# Per-machine runtime preferences (e.g. the /think toggle)
+data/user_prefs.json

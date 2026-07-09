@@ -31,6 +31,7 @@ import sys
 import traceback
 from typing import Any, Optional
 
+from athena.config.settings import get_settings
 from athena.events.bus import get_event_bus
 from athena.events.models import Event
 from athena.thought.models import Thought
@@ -82,10 +83,19 @@ class ThoughtPipeline:
         - ThoughtCompleted
     """
 
-    def __init__(self, memory_manager=None, knowledge_manager=None, provider=None):
+    def __init__(
+        self,
+        memory_manager=None,
+        knowledge_manager=None,
+        provider=None,
+        learning_provider=None,
+    ):
         self.memory_manager = memory_manager
         self.knowledge_manager = knowledge_manager
         self.provider = provider
+        # Provider used for the learning phase (extraction/reconciliation).
+        # Defaults to the reasoning provider when not supplied.
+        self.learning_provider = learning_provider or provider
 
     @staticmethod
     def create(user_input: str) -> Thought:
@@ -109,7 +119,7 @@ class ThoughtPipeline:
         bus.publish(event)
         return thought
 
-    async def process(self, thought: Thought) -> Any:
+    async def process(self, thought: Thought, on_response=None) -> Any:
         """
         Run a Thought through all processing stages sequentially.
 
@@ -123,6 +133,9 @@ class ThoughtPipeline:
 
         Args:
             thought: The Thought object to process.
+            on_response: Optional callback invoked with the response string as
+                soon as the answer is ready — before the slower learning phase
+                runs — so callers can display it immediately.
 
         Returns:
             The final response string from the thought, or None if not set.
@@ -160,37 +173,48 @@ class ThoughtPipeline:
                     "I'm sorry, I'm currently unable to process your request."
                 )
 
-        # Learning Phase: runs even if reasoning failed,
-        # but is itself isolated so failures don't propagate.
-        try:
-            self._extract_candidates(thought)
-        except Exception:
-            exc_type, exc_value, exc_tb = sys.exc_info()
-            tb_str = "".join(traceback.format_exception(exc_type, exc_value, exc_tb))
-            print(f"\n[PIPELINE TRACE] extract_candidates exception:")
-            print(f"[PIPELINE TRACE] Exception type: {exc_type.__name__}")
-            print(f"[PIPELINE TRACE] Exception message: {exc_value}")
-            print(f"[PIPELINE TRACE] Full traceback:\n{tb_str}")
-            thought.trace["extract_candidates_error"] = {
-                "exception_type": exc_type.__name__,
-                "exception_message": str(exc_value),
-                "traceback": tb_str,
-            }
+        # The answer is ready. Surface it immediately so the user isn't left
+        # waiting on the slower learning phase that follows.
+        if on_response is not None:
+            try:
+                on_response(thought.get_response())
+            except Exception:
+                pass
 
-        try:
-            await self._validate_knowledge(thought)
-        except Exception:
-            exc_type, exc_value, exc_tb = sys.exc_info()
-            tb_str = "".join(traceback.format_exception(exc_type, exc_value, exc_tb))
-            print(f"\n[PIPELINE TRACE] validate_knowledge exception:")
-            print(f"[PIPELINE TRACE] Exception type: {exc_type.__name__}")
-            print(f"[PIPELINE TRACE] Exception message: {exc_value}")
-            print(f"[PIPELINE TRACE] Full traceback:\n{tb_str}")
-            thought.trace["validate_knowledge_error"] = {
-                "exception_type": exc_type.__name__,
-                "exception_message": str(exc_value),
-                "traceback": tb_str,
-            }
+        # Learning Phase: extract knowledge and reconcile memory. Gated by the
+        # learning.enabled setting (toggle with /learn) because it costs extra
+        # model calls beyond the answer itself. Still isolated so failures never
+        # propagate. reflect/finalize below are trivial and always run.
+        if get_settings().learning.enabled:
+            try:
+                self._extract_candidates(thought)
+            except Exception:
+                exc_type, exc_value, exc_tb = sys.exc_info()
+                tb_str = "".join(traceback.format_exception(exc_type, exc_value, exc_tb))
+                print(f"\n[PIPELINE TRACE] extract_candidates exception:")
+                print(f"[PIPELINE TRACE] Exception type: {exc_type.__name__}")
+                print(f"[PIPELINE TRACE] Exception message: {exc_value}")
+                print(f"[PIPELINE TRACE] Full traceback:\n{tb_str}")
+                thought.trace["extract_candidates_error"] = {
+                    "exception_type": exc_type.__name__,
+                    "exception_message": str(exc_value),
+                    "traceback": tb_str,
+                }
+
+            try:
+                await self._validate_knowledge(thought)
+            except Exception:
+                exc_type, exc_value, exc_tb = sys.exc_info()
+                tb_str = "".join(traceback.format_exception(exc_type, exc_value, exc_tb))
+                print(f"\n[PIPELINE TRACE] validate_knowledge exception:")
+                print(f"[PIPELINE TRACE] Exception type: {exc_type.__name__}")
+                print(f"[PIPELINE TRACE] Exception message: {exc_value}")
+                print(f"[PIPELINE TRACE] Full traceback:\n{tb_str}")
+                thought.trace["validate_knowledge_error"] = {
+                    "exception_type": exc_type.__name__,
+                    "exception_message": str(exc_value),
+                    "traceback": tb_str,
+                }
 
         try:
             self._reflect(thought)
@@ -613,10 +637,10 @@ class ThoughtPipeline:
             # Phase 2: LLM-based reconciliation for valid candidates
             reconciliation_results = None
 
-            if valid_candidates and self.provider is not None:
-                reconciler = MemoryReconciler(self.provider)
+            if valid_candidates and self.learning_provider is not None:
+                reconciler = MemoryReconciler(self.learning_provider)
                 reconciliation_results = reconciler.reconcile(valid_candidates, semantic_mem)
-            elif valid_candidates and self.provider is None:
+            elif valid_candidates and self.learning_provider is None:
                 # No provider available — do NOT modify SM (fail-safe)
                 reconciliation_results = {
                     'processed': len(valid_candidates),

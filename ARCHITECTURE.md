@@ -175,6 +175,28 @@ A **separate, pipeline-free path** for answering questions grounded strictly in 
 - The selected PDF is extracted (`pypdf`) and split into overlapping word-window chunks. Because a book far exceeds the context window, only the passages most relevant to each question (keyword-scored) are injected — retrieval, not whole-book injection.
 - `AthenaBrain.answer_from_book()` bypasses the Thought pipeline entirely: **no tools, no memory retrieval/injection, no knowledge extraction**. It sends the retrieved passages with the strict `book` prompt profile ("answer only from these excerpts") directly to the provider.
 
+### Tarot Mode (`athena/tarot/`)
+
+Another **separate, pipeline-free path**, entered from the console with `/tarot`.
+
+- Cards are drawn by a system RNG (OS entropy) from a pluggable deck **before** any interpretation, so the model cannot handpick them — it only reads the draw. Spreads (1–6 cards), reversals, and follow-up one-card pulls are handled in `athena/tarot/reading.py`.
+- `AthenaBrain.tarot_reading()` bypasses the Thought pipeline: **no tools, no web search, no memory retrieval/injection, no knowledge extraction**. The drawn spread is sent with the `tarot` prompt profile directly to the provider.
+
+### Serve Mode (`athena/serve/`)
+
+A **separate, pipeline-free path** that exposes the resident reasoning model over an **OpenAI-compatible HTTP API** for external clients (e.g. Open WebUI). Entered from the console with `/serve [port]` (default `8080`); it blocks the terminal until `Ctrl+C`.
+
+- `build_app()` wraps the **already-loaded** `llama_cpp.Llama` instance in a FastAPI app — no second copy of the model is loaded. It serves `GET /v1/models` and `POST /v1/chat/completions` (streaming and non-streaming). llama-cpp-python already emits OpenAI-shaped payloads, so the handlers are near pass-throughs.
+- Because `llama_cpp.Llama` is **not thread-safe**, all generation is serialized behind a lock; concurrent requests wait their turn.
+- Serve mode bypasses the Thought pipeline entirely: **no tools, no memory, no knowledge extraction** — it is pure model inference.
+- **Memory management:** if a *dedicated* learning model is loaded, it is unloaded (`LlamaCppProvider.unload()`) to free its memory while only the reasoning model is served, then restored (`reload()`) when serving stops. When learning simply falls back to the reasoning model, there is nothing separate to unload.
+
+### First-Run Onboarding (`athena/onboarding.py`) and Launcher (`Athena.bat`)
+
+- **Launcher:** `Athena.bat` at the repo root starts Athena from any location — it `cd`s to its own folder (`%~dp0`), prefers a project `.venv`/`venv` Python when present, verifies Python is installed (with a friendly install pointer if not), and keeps the console open on errors so double-click users can read the message.
+- **Onboarding:** before constructing the Brain, the terminal checks whether any `.gguf` exists under `models/reason`. If not, instead of crashing with a `FileNotFoundError`, it creates the model folders and prints a consumer-friendly guide: what a `.gguf` file is, how to download one from Hugging Face (search "<model> GGUF", pick the `Q4_K_M` file), and why an optional small model in `models/learning` makes replies feel faster.
+- **Hardware-tailored recommendations:** the guide reuses `HardwareDetector` to read CPU/RAM/GPU (true VRAM via the registry on Windows) and recommends reasoning + learning model sizes for the machine — budgeting by VRAM when a GPU is present, else by ~half of system RAM, with headroom reserved for the context window. Detection failures degrade to generic size advice, never a crash.
+
 ### Providers (`athena/providers/`)
 
 All providers implement `LLMProvider` (abstract base):

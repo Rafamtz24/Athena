@@ -18,9 +18,28 @@ class ProviderSettings:
     model: str = "qwen2.5-7b-instruct"
     temperature: float = 0.7
 
-    # Local GGUF model configuration
+    # Local GGUF model configuration.
+    # Reasoning and learning models live in separate sub-folders so a small,
+    # fast, non-thinking model can handle the learning pipeline while a larger
+    # model does the reasoning. If the learning folder holds no model, learning
+    # falls back to the reasoning model.
     model_directory: str = "models"
+    reason_model_directory: str = "models/reason"
+    learning_model_directory: str = "models/learning"
     reasoning_model: str = "qwen2.5-7b-instruct-q4_k_m.gguf"
+
+    # Hard cap on tokens generated per call. Prevents "thinking" models
+    # (which emit long <think>…</think> traces) from generating unbounded
+    # output and appearing to hang — including on the silent learning-phase
+    # calls that run after each response.
+    max_tokens: int = 2048
+
+    # Whether "thinking" models are allowed to emit their <think>…</think>
+    # reasoning trace. When False, the Qwen3 `/no_think` soft-switch is sent
+    # so the model answers directly (faster). Toggle at runtime with
+    # `/think on` and `/think off`. Reasoning is stripped from output either
+    # way; this only controls whether the model spends tokens producing it.
+    thinking_enabled: bool = True
 
 
 @dataclass(frozen=False)
@@ -31,6 +50,9 @@ class StorageSettings:
     chat_history_path: str = "data/chat_history.json"
     semantic_memory_path: str = "data/semantic_memory.json"
     books_path: str = "books"
+    # Runtime-adjustable preferences that persist across restarts
+    # (e.g. the /think toggle). Static defaults live in this module.
+    user_prefs_path: str = "data/user_prefs.json"
 
 
 @dataclass(frozen=False)
@@ -126,6 +148,13 @@ class AppSettings:
 
 # Global configuration instance (singleton pattern)
 settings = AppSettings()
+
+# Overlay any persisted runtime preferences (e.g. the /think toggle) so they
+# survive restarts. Kept out of the dataclass defaults on purpose: those stay
+# static, this reflects the user's last choice.
+from athena.config.persistence import apply_to_settings  # noqa: E402
+
+apply_to_settings(settings)
 
 
 def get_settings() -> AppSettings:

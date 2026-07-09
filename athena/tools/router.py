@@ -41,7 +41,10 @@ def _execute_system_tool(
     # Gather Athena runtime info
     provider_info = {
         "provider": settings.provider.provider,
-        "reasoning_model": settings.provider.reasoning_model,
+        # Prefer the model actually loaded by the provider; fall back to the
+        # configured default only if the provider can't report one.
+        "reasoning_model": getattr(provider, "model_name", None)
+        or settings.provider.reasoning_model,
         "backend": getattr(settings.provider, "backend", "N/A"),
         "gpu_layers": getattr(settings.provider, "gpu_layers", "N/A"),
         "context_size": getattr(settings, "context_size", "N/A"),

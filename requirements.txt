@@ -16,3 +16,7 @@ duckduckgo-search==8.1.1
 
 # Book reading mode (/book) — PDF text extraction
 pypdf==6.14.2
+
+# Serve mode (/serve) — OpenAI-compatible API for external clients
+fastapi==0.138.1
+uvicorn==0.49.0
