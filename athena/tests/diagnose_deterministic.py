@@ -3,7 +3,7 @@ Deterministic diagnostic — uses a mock provider that ALWAYS works,
 to trace the exact pipeline path and identify state corruption.
 
 We need to determine:
-  - Which pipeline stage processes "my name is actually rafael" differently
+  - Which pipeline stage processes "my name is actually alex" differently
     than "hello"
   - Whether any stage corrupts shared state (provider, working memory, 
     semantic memory) that affects subsequent requests
@@ -73,11 +73,11 @@ async def diagnose():
 
     print()
     print("=" * 70)
-    print("REQUEST 2: 'my name is actually rafael'")
+    print("REQUEST 2: 'my name is actually alex'")
     print("=" * 70)
 
     try:
-        r2 = await brain.process("my name is actually rafael")
+        r2 = await brain.process("my name is actually alex")
         print(f">>> Response 2: {r2!r}")
         print(f">>> brain.history count: {len(brain.history)}")
         print(f">>> brain.memory_manager.get_working() count: {len(brain.memory_manager.get_working())}")

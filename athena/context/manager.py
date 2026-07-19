@@ -28,7 +28,7 @@ from athena.config.settings import get_settings
 # Authority order (high -> low): the user's current message wins, then
 # confirmed durable facts (Semantic Memory), then the replayed conversation
 # (Working Memory). Semantic ranks ABOVE Working Memory so a stored fact
-# ("User's name is Rafael") outranks a stale conversational turn, while the
+# ("User's name is Alex") outranks a stale conversational turn, while the
 # current user input still overrides everything (recency preserved).
 PRIORITY_USER_INPUT = 100
 PRIORITY_SYSTEM_PROMPT = 95

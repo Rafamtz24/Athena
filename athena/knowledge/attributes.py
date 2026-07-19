@@ -9,7 +9,7 @@ Why this exists:
     Conflict detection was previously delegated entirely to the LLM via the
     MemoryReconciler. On small / simple reasoning models that classification
     is unreliable — contradictory facts ("User's name is TestUser" vs
-    "User's name is Rafael") were both kept. For single-valued attributes the
+    "User's name is Alex") were both kept. For single-valued attributes the
     answer is deterministic and does not need a model: if a new fact states a
     different value for the SAME attribute of the SAME subject, it CONFLICTS
     and the newer value wins.
@@ -25,7 +25,7 @@ A single-valued attribute is one a subject can only have one of at a time:
     - a pet's color
     - the operating system
 
-Multi-valued relationships (e.g. "User has a dog named Gemma" — a user may
+Multi-valued relationships (e.g. "User has a dog named Rex" — a user may
 have several pets) are intentionally NOT modeled here; they go to the LLM.
 """
 
@@ -96,7 +96,7 @@ class AttributeFact:
     """A statement parsed into a structured single-valued attribute fact.
 
     Attributes:
-        subject: Canonical, lowercased subject (e.g. "user", "gemma", "system").
+        subject: Canonical, lowercased subject (e.g. "user", "rex", "system").
         attribute: Canonical attribute key (e.g. "name", "location").
         value: The value exactly as extracted (original case preserved for
                storage; use ``value_norm`` for comparison).

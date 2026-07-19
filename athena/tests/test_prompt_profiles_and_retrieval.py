@@ -139,11 +139,11 @@ def test_retrieval_score_relevance():
     from athena.knowledge.manager import KnowledgeManager
     km = KnowledgeManager()
 
-    score = km._score_relevance("User has a dog named Gemma", ["dog", "name"])
+    score = km._score_relevance("User has a dog named Rex", ["dog", "name"])
     assert score > 0
     print(f"  [PASS] Score for matching words: {score:.3f}")
 
-    score = km._score_relevance("User lives in Monterrey", ["hello", "test"])
+    score = km._score_relevance("User lives in Lisbon", ["hello", "test"])
     assert score == 0
     print(f"  [PASS] Score for unrelated words: 0.0")
 
@@ -158,8 +158,8 @@ def test_retrieval_greeting_returns_none():
     class MockMemoryManager:
         def query_semantic(self):
             return [
-                type('Entry', (), {'content': 'User has a dog named Gemma'}),
-                type('Entry', (), {'content': 'User lives in Monterrey'}),
+                type('Entry', (), {'content': 'User has a dog named Rex'}),
+                type('Entry', (), {'content': 'User lives in Lisbon'}),
             ]
 
     km = KnowledgeManager(memory_manager=MockMemoryManager())
@@ -175,8 +175,8 @@ def test_retrieval_vague_statement_returns_none():
     class MockMemoryManager:
         def query_semantic(self):
             return [
-                type('Entry', (), {'content': 'User has a dog named Gemma'}),
-                type('Entry', (), {'content': 'User lives in Monterrey'}),
+                type('Entry', (), {'content': 'User has a dog named Rex'}),
+                type('Entry', (), {'content': 'User lives in Lisbon'}),
             ]
 
     km = KnowledgeManager(memory_manager=MockMemoryManager())
@@ -192,21 +192,21 @@ def test_retrieval_factual_question_matches():
     class MockMemoryManager:
         def query_semantic(self):
             return [
-                type('Entry', (), {'content': 'User has a dog named Gemma'}),
-                type('Entry', (), {'content': 'User lives in Monterrey'}),
-                type('Entry', (), {'content': "User's name is Rafael"}),
+                type('Entry', (), {'content': 'User has a dog named Rex'}),
+                type('Entry', (), {'content': 'User lives in Lisbon'}),
+                type('Entry', (), {'content': "User's name is Alex"}),
             ]
 
     km = KnowledgeManager(memory_manager=MockMemoryManager())
 
     result = km.retrieve("What is my dog's name?")
     assert result is not None
-    assert "dog" in result.lower() and "gemma" in result.lower()
+    assert "dog" in result.lower() and "rex" in result.lower()
     print(f"  [PASS] 'What is my dog's name?' retrieves dog fact")
 
     result = km.retrieve("Where do I live?")
     assert result is not None
-    assert "lives" in result.lower() or "monterrey" in result.lower()
+    assert "lives" in result.lower() or "lisbon" in result.lower()
     print(f"  [PASS] 'Where do I live?' retrieves location fact")
 
 
@@ -216,9 +216,9 @@ def test_retrieval_memory_recall_returns_all():
     class MockMemoryManager:
         def query_semantic(self):
             return [
-                type('Entry', (), {'content': 'User has a dog named Gemma'}),
-                type('Entry', (), {'content': 'User lives in Monterrey'}),
-                type('Entry', (), {'content': "User's name is Rafael"}),
+                type('Entry', (), {'content': 'User has a dog named Rex'}),
+                type('Entry', (), {'content': 'User lives in Lisbon'}),
+                type('Entry', (), {'content': "User's name is Alex"}),
             ]
 
     km = KnowledgeManager(memory_manager=MockMemoryManager())
@@ -233,7 +233,7 @@ def test_retrieval_memory_recall_returns_all():
     for query in queries:
         result = km.retrieve(query)
         assert result is not None, f"'{query}' should retrieve memories"
-        assert "dog" in result.lower() or "monterrey" in result.lower() or "rafael" in result.lower()
+        assert "dog" in result.lower() or "lisbon" in result.lower() or "alex" in result.lower()
     print("  [PASS] Memory recall queries retrieve all durable memories")
 
 
@@ -242,7 +242,7 @@ def test_retrieval_fallback_to_none():
 
     class MockMemoryManager:
         def query_semantic(self):
-            return [type('Entry', (), {'content': 'User has a dog named Gemma'})]
+            return [type('Entry', (), {'content': 'User has a dog named Rex'})]
 
     km = KnowledgeManager(memory_manager=MockMemoryManager())
     result = km.retrieve("What is the weather like in Paris?")
@@ -256,8 +256,8 @@ def test_retrieval_max_results():
     class MockMemoryManager:
         def query_semantic(self):
             return [
-                type('Entry', (), {'content': 'User has a dog named Gemma'}),
-                type('Entry', (), {'content': 'User lives in Monterrey'}),
+                type('Entry', (), {'content': 'User has a dog named Rex'}),
+                type('Entry', (), {'content': 'User lives in Lisbon'}),
                 type('Entry', (), {'content': 'User works at Company'}),
                 type('Entry', (), {'content': 'User likes pizza'}),
             ]

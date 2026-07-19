@@ -20,7 +20,7 @@ def test_validate_knowledge_consumption():
     km.provider = MockProvider()
 
     # Step 1: Extract candidates via LearningContextPackage
-    conversation = "Hello\nI am Rafael"
+    conversation = "Hello\nI am Alex"
     package = LearningContextPackage(
         sources=[ContextSource(name="conversation", content=conversation)],
         conversation=conversation,

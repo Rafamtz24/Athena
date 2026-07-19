@@ -32,8 +32,8 @@ async def diagnose():
     mock.generate.return_value = "I understand. Tell me more."
 
     # Simulate the extraction returning an actual fact about the user's name
-    # This is what the REAL LLM would return for "my name is actually rafael"
-    mock.call.return_value = "User's name is Rafael"
+    # This is what the REAL LLM would return for "my name is actually alex"
+    mock.call.return_value = "User's name is Alex"
 
     brain.provider = mock
     brain.pipeline.provider = mock
@@ -56,11 +56,11 @@ async def diagnose():
 
     print()
     print("=" * 70)
-    print("STEP 2: process 'my name is actually rafael'")
+    print("STEP 2: process 'my name is actually alex'")
     print("=" * 70)
 
     try:
-        r2 = await brain.process("my name is actually rafael")
+        r2 = await brain.process("my name is actually alex")
         print(f">>> Response: {r2!r}")
         sm_count = len(brain.memory_manager.query_semantic())
         print(f">>> Semantic memory entries: {sm_count}")

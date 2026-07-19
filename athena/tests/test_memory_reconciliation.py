@@ -156,8 +156,8 @@ def main():
 
     # ── Test 1: Name change ──
     run_test_scenario(
-        test_name="Name change: Rafael -> Pedro",
-        initial_facts=["User's name is Rafael"],
+        test_name="Name change: Alex -> Pedro",
+        initial_facts=["User's name is Alex"],
         candidate_statement="User's name is Pedro",
         expected_conflict_count=1,
     )
@@ -172,8 +172,8 @@ def main():
 
     # ── Test 3: City change ──
     run_test_scenario(
-        test_name="City change: Monterrey -> Guadalajara",
-        initial_facts=["User lives in Monterrey"],
+        test_name="City change: Lisbon -> Guadalajara",
+        initial_facts=["User lives in Lisbon"],
         candidate_statement="User lives in Guadalajara",
         expected_conflict_count=1,
     )

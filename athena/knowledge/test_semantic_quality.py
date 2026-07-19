@@ -24,19 +24,19 @@ from athena.knowledge.validator import KnowledgeValidator
 
 VALID_FACTS = [
     # Name
-    "User's name is Rafael",
-    "User's last name is Hernandez",
+    "User's name is Alex",
+    "User's last name is Turner",
     "User's full name is John Michael Smith",
 
     # Location
-    "User lives in Monterrey",
+    "User lives in Lisbon",
     "User lives in Mexico City",
     "User lives in the United States",
     "User is from Canada",
     "User lives in New York City",
 
     # Pet
-    "User has a dog named Gema",
+    "User has a dog named Rex",
     "User has a cat named Whiskers",
     "User owns a parrot",
 
@@ -282,9 +282,9 @@ INVALID_SPECIFIC = [
 # Facts that would be valid coming from the VALID_EXAMPLES
 # as described in the task description
 VALID_AUTO_BIOGRAPHICAL = [
-    "User's name is Rafael",
-    "User lives in Monterrey",
-    "User has a dog named Gema",
+    "User's name is Alex",
+    "User lives in Lisbon",
+    "User has a dog named Rex",
     "User's favorite color is blue",
     "User is studying psychology",
 ]

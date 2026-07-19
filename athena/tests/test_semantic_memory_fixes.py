@@ -91,22 +91,22 @@ def test_stem_keeps_name_and_named_distinct():
 
 def test_name_query_does_not_inject_dog():
     km = _make_manager([
-        "User has a dog named Gemma",
-        "User's name is Rafael",
-        "User lives in Monterrey",
+        "User has a dog named Rex",
+        "User's name is Alex",
+        "User lives in Lisbon",
     ])
-    result = km.retrieve("my name is actually rafael")
+    result = km.retrieve("my name is actually alex")
     assert result is not None
-    assert "Gemma" not in result, "Dog fact must not be injected on a name query"
-    assert "Monterrey" not in result, "Location fact must not be injected on a name query"
-    assert "Rafael" in result
+    assert "Rex" not in result, "Dog fact must not be injected on a name query"
+    assert "Lisbon" not in result, "Location fact must not be injected on a name query"
+    assert "Alex" in result
     print("  [OK] Name query no longer injects the unrelated dog/location facts")
 
 
 def test_unrelated_query_returns_nothing():
     km = _make_manager([
-        "User has a dog named Gemma",
-        "User's name is Rafael",
+        "User has a dog named Rex",
+        "User's name is Alex",
     ])
     # A query about the weather shares no discriminative words with any fact.
     assert km.retrieve("what is the weather like today") is None
@@ -115,11 +115,11 @@ def test_unrelated_query_returns_nothing():
 
 def test_relevant_query_still_retrieves():
     km = _make_manager([
-        "User has a dog named Gemma",
-        "User's name is Rafael",
+        "User has a dog named Rex",
+        "User's name is Alex",
     ])
     result = km.retrieve("what is my dog called")
-    assert result is not None and "Gemma" in result
+    assert result is not None and "Rex" in result
     print("  [OK] Directly relevant query still retrieves the fact")
 
 
@@ -128,11 +128,11 @@ def test_capitalized_query_words_match():
     # ("User" -> "ser"), which only worked before due to lenient substring
     # matching. Capitalized query words must match whole entry words.
     km = _make_manager([
-        "User has a dog named Gemma",
-        "User lives in Monterrey",
+        "User has a dog named Rex",
+        "User lives in Lisbon",
     ])
     result = km.retrieve("Tell me about the Dog")
-    assert result is not None and "Gemma" in result
+    assert result is not None and "Rex" in result
     print("  [OK] Capitalized query words are matched correctly")
 
 
@@ -142,11 +142,11 @@ def test_capitalized_query_words_match():
 
 def test_parse_single_valued_attributes():
     cases = {
-        "User's name is Rafael": ("user", "name", "Rafael"),
-        "User name is Rafael": ("user", "name", "Rafael"),
-        "My name is Rafael": ("user", "name", "Rafael"),
-        "User lives in Monterrey": ("user", "location", "Monterrey"),
-        "Gemma's color is black": ("gemma", "color", "black"),
+        "User's name is Alex": ("user", "name", "Alex"),
+        "User name is Alex": ("user", "name", "Alex"),
+        "My name is Alex": ("user", "name", "Alex"),
+        "User lives in Lisbon": ("user", "location", "Lisbon"),
+        "Rex's color is black": ("rex", "color", "black"),
         "Operating System is Windows 11": ("system", "operating_system", "Windows 11"),
     }
     for statement, (subj, attr, val) in cases.items():
@@ -160,7 +160,7 @@ def test_parse_single_valued_attributes():
 
 def test_parse_defers_multivalued_and_unknown():
     # A user may have many pets — not a single-valued attribute.
-    assert parse_fact("User has a dog named Gemma") is None
+    assert parse_fact("User has a dog named Rex") is None
     # Ambiguous phrasing is deferred rather than guessed.
     assert parse_fact("User uses Windows 11") is None
     assert parse_fact("User enjoys hiking on weekends") is None
@@ -168,11 +168,11 @@ def test_parse_defers_multivalued_and_unknown():
 
 
 def test_name_variants_share_a_key():
-    a = parse_fact("User's name is Rafael")
-    b = parse_fact("User name is Rafael")
-    c = parse_fact("My name is Rafael")
+    a = parse_fact("User's name is Alex")
+    b = parse_fact("User name is Alex")
+    c = parse_fact("My name is Alex")
     assert a.key == b.key == c.key == ("user", "name")
-    assert a.value_norm == b.value_norm == c.value_norm == "rafael"
+    assert a.value_norm == b.value_norm == c.value_norm == "alex"
     print("  [OK] Name phrasing variants normalize to one key/value")
 
 
@@ -183,20 +183,20 @@ def test_name_variants_share_a_key():
 def test_conflict_resolved_without_llm():
     sm = FakeSemanticMemory(["User's name is TestUser"])
     reconciler = MemoryReconciler(ExplodingProvider())
-    candidate = KnowledgeCandidate(statement="User's name is Rafael",
+    candidate = KnowledgeCandidate(statement="User's name is Alex",
                                    confidence=0.8, category="extracted")
     results = reconciler.reconcile([candidate], sm)
     assert results["conflicts"] == 1
     contents = sm.contents()
     assert "User's name is TestUser" not in contents, "Stale name must be removed"
-    assert "User's name is Rafael" in contents, "New name must be stored"
+    assert "User's name is Alex" in contents, "New name must be stored"
     print("  [OK] Name conflict resolved deterministically (old removed, new kept)")
 
 
 def test_duplicate_detected_without_llm():
-    sm = FakeSemanticMemory(["User's name is Rafael"])
+    sm = FakeSemanticMemory(["User's name is Alex"])
     reconciler = MemoryReconciler(ExplodingProvider())
-    candidate = KnowledgeCandidate(statement="User name is Rafael",
+    candidate = KnowledgeCandidate(statement="User name is Alex",
                                    confidence=0.8, category="extracted")
     results = reconciler.reconcile([candidate], sm)
     assert results["duplicates"] == 1
@@ -205,13 +205,13 @@ def test_duplicate_detected_without_llm():
 
 
 def test_new_attribute_stored_without_llm():
-    sm = FakeSemanticMemory(["User's name is Rafael"])
+    sm = FakeSemanticMemory(["User's name is Alex"])
     reconciler = MemoryReconciler(ExplodingProvider())
-    candidate = KnowledgeCandidate(statement="User lives in Monterrey",
+    candidate = KnowledgeCandidate(statement="User lives in Lisbon",
                                    confidence=0.8, category="extracted")
     results = reconciler.reconcile([candidate], sm)
     assert results["new_facts"] == 1
-    assert "User lives in Monterrey" in sm.contents()
+    assert "User lives in Lisbon" in sm.contents()
     print("  [OK] New single-valued attribute stored deterministically")
 
 

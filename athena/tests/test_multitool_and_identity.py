@@ -115,7 +115,7 @@ def test_live_info_and_contractions_trigger_web():
     # Live topics + contractions that previously slipped through as "no tool"
     # (causing the model to fabricate an answer) now trigger a web search.
     for q in [
-        "whats the weather today in monterrey mexico",
+        "whats the weather today in lisbon mexico",
         "hows the weather in paris",
         "whats the price of bitcoin",
         "who won the game last night",
@@ -135,15 +135,15 @@ def test_personal_queries_do_not_web_search():
 def test_live_info_not_suppressed_by_memory_overlap():
     from athena.planner.planner import plan
     # A weather query for the user's own city routes to the weather tool even
-    # though the city ("Monterrey") is a stored fact — no memory suppression.
-    t = Thought(user_input="hows the weather today in monterrey mexico?")
-    t.knowledge = "User lives in Monterrey"
+    # though the city ("Lisbon") is a stored fact — no memory suppression.
+    t = Thought(user_input="hows the weather today in lisbon mexico?")
+    t.knowledge = "User lives in Lisbon"
     assert plan(t).tool == "weather"
 
     # A non-weather live-info query mentioning a stored fact still web-searches
     # rather than being short-circuited by the incidental overlap.
-    t2 = Thought(user_input="whats the latest news about monterrey")
-    t2.knowledge = "User lives in Monterrey"
+    t2 = Thought(user_input="whats the latest news about lisbon")
+    t2.knowledge = "User lives in Lisbon"
     assert plan(t2).tool == "web"
 
     # A genuinely memory-answerable, non-live query still short-circuits.
@@ -182,7 +182,7 @@ def test_temperature_disambiguation():
 
 
 def test_weather_queries_route_to_weather_tool():
-    for q in ["whats the weather like today on monterrey?",
+    for q in ["whats the weather like today on lisbon?",
               "is it hot in paris",
               "will it rain tomorrow"]:
         assert "weather" in _tool_for(q), f"Expected weather tool for {q!r}"
@@ -191,7 +191,7 @@ def test_weather_queries_route_to_weather_tool():
 
 def test_extract_location():
     from athena.planner.planner import _extract_location
-    assert _extract_location("whats the weather like today on monterrey?") == "monterrey"
+    assert _extract_location("whats the weather like today on lisbon?") == "lisbon"
     assert _extract_location("weather in paris today") == "paris"
     assert _extract_location("hows the weather") == ""
     print("  [OK] Location extraction from weather queries")
@@ -208,7 +208,7 @@ def test_weather_tool_parse_and_failure():
             "windspeedKmph": "11", "weatherDesc": [{"value": "Partly cloudy"}],
         }],
         "nearest_area": [{
-            "areaName": [{"value": "Monterrey"}],
+            "areaName": [{"value": "Lisbon"}],
             "region": [{"value": "Nuevo Leon"}],
             "country": [{"value": "Mexico"}],
         }],
@@ -221,9 +221,9 @@ def test_weather_tool_parse_and_failure():
         def __exit__(self, *a): return False
 
     with patch("urllib.request.urlopen", return_value=FakeResp(fake)):
-        data = weather.fetch_weather("monterrey")
+        data = weather.fetch_weather("lisbon")
     assert data["temp_c"] == "22"
-    assert "Monterrey" in data["location"]
+    assert "Lisbon" in data["location"]
     rendered = weather.format_weather(data)
     assert "22" in rendered and "Partly cloudy" in rendered
 

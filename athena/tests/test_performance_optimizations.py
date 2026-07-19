@@ -48,11 +48,11 @@ def test_skip_empty():
     print("  [OK] Empty input correctly skipped")
 
 def test_run_extraction_for_learnable():
-    assert _is_extraction_needed("My name is Rafael.")
-    assert _is_extraction_needed("I live in Monterrey.")
+    assert _is_extraction_needed("My name is Alex.")
+    assert _is_extraction_needed("I live in Lisbon.")
     assert _is_extraction_needed("I prefer Linux.")
     assert _is_extraction_needed("My favorite color is blue.")
-    assert _is_extraction_needed("I have a dog named Gemma.")
+    assert _is_extraction_needed("I have a dog named Rex.")
     assert _is_extraction_needed("What is the weather like today?")
     assert _is_extraction_needed("Tell me about quantum computing.")
     print("  [OK] Learnable interactions correctly identified for extraction")

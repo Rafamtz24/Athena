@@ -20,7 +20,7 @@ def test_extract_candidates_structure():
     km.provider = MockProvider()
 
     # Build a LearningContextPackage instead of passing raw strings
-    conversation = "Hello\nI am Rafael\nI live in Mexico\nI work on AI projects"
+    conversation = "Hello\nI am Alex\nI live in Mexico\nI work on AI projects"
     package = LearningContextPackage(
         sources=[ContextSource(name="test", content=conversation)],
         conversation=conversation,

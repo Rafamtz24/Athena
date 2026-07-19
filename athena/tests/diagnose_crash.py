@@ -3,7 +3,7 @@ Diagnostic script — traces the exact exception in the reproduction scenario.
 
 Reproduction:
     1. "hello"                     → works
-    2. "my name is actually rafael" → permanently breaks Athena
+    2. "my name is actually alex" → permanently breaks Athena
 
 This script runs both commands with full pipeline instrumentation
 and prints the exact exception and stack trace at every stage.
@@ -39,16 +39,16 @@ async def reproduce():
 
     print()
     print("=" * 70)
-    print("REPRODUCTION: 'my name is actually rafael'")
+    print("REPRODUCTION: 'my name is actually alex'")
     print("=" * 70)
 
     try:
-        r2 = await brain.process("my name is actually rafael")
+        r2 = await brain.process("my name is actually alex")
         print(f"\n>>> Response: {r2!r}")
     except Exception:
         exc_type, exc_value, exc_tb = sys.exc_info()
         tb_str = "".join(traceback.format_exception(exc_type, exc_value, exc_tb))
-        print(f"\n>>> CRASHED on 'my name is actually rafael'!")
+        print(f"\n>>> CRASHED on 'my name is actually alex'!")
         print(f">>> Exception type: {exc_type.__name__}")
         print(f">>> Exception: {exc_value}")
         print(f">>> Traceback:\n{tb_str}")
