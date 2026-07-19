@@ -31,12 +31,16 @@ from athena.brain.brain import AthenaBrain
 from athena.config.settings import get_settings
 
 
-class _LearningIndicator:
-    """Animated 'Learning . .. ...' shown while the post-answer learning phase runs.
+class _ActivityIndicator:
+    """Animated '<label> . .. ...' shown while a slow phase runs.
+
+    Used for both phases that keep the user waiting: reasoning (before the
+    answer appears) and learning (after it). Without one, a large model split
+    across GPU and CPU looks indistinguishable from a hang.
 
     Runs on a daemon thread and rewrites a single terminal line, so it never
-    scrolls. ``start()`` is a no-op-safe to pair with ``stop()`` even if the
-    phase is skipped.
+    scrolls. ``stop()`` is safe to call when never started, and safe to call
+    twice, so callers can stop defensively on any exit path.
     """
 
     def __init__(self, label: str = "Learning") -> None:
@@ -385,16 +389,16 @@ def _serve_mode(brain: AthenaBrain, port: int = 8080) -> None:
         )
         return
 
-    from athena.serve import build_app
+    from athena.serve import build_app, can_serve
 
-    # Serve mode wraps the in-process GGUF model, which only the llamacpp
-    # provider exposes. Other providers (e.g. LM Studio) already run their own
-    # server, so there is nothing here for us to wrap.
-    if not hasattr(brain.provider, "model"):
+    # Both local providers can be served. A remote provider (e.g. LM Studio) is
+    # already an endpoint of its own, so proxying it through Athena would add a
+    # hop and nothing else — point the client straight at it instead.
+    if not can_serve(brain.provider):
         print(
-            f"\nServe mode requires the local 'llamacpp' provider. The current "
-            f"provider ('{get_settings().provider.provider}') can't be served "
-            f"this way.\n"
+            f"\nServe mode publishes a local model, but the current provider "
+            f"('{get_settings().provider.provider}') is already a server. "
+            f"Point your client at that endpoint directly.\n"
         )
         return
 
@@ -511,17 +515,27 @@ def main() -> None:
                 # Unknown command — still pass to brain for potential LLM handling
                 pass
 
-        # Show the answer as soon as it's ready, then animate "Learning…" while
-        # the slower learning phase (extra model calls) finishes in the pipeline.
-        indicator = _LearningIndicator()
+        # Both phases are slow enough to look like a hang, so each gets its own
+        # indicator: "Thinking" until the answer is ready, then "Learning" while
+        # the extra model calls finish in the pipeline.
+        thinking = _ActivityIndicator("Thinking")
+        learning = _ActivityIndicator("Learning")
 
         def on_answer(answer: str) -> None:
+            thinking.stop()
             print(f"\n{answer}\n")
             if get_settings().learning.enabled:
-                indicator.start()
+                learning.start()
 
-        asyncio.run(brain.process(stripped, on_answer=on_answer))
-        indicator.stop()
+        thinking.start()
+        try:
+            asyncio.run(brain.process(stripped, on_answer=on_answer))
+        finally:
+            # on_answer stops "Thinking" on the normal path, but a crash before
+            # the answer is ready would otherwise leave the thread spinning over
+            # the traceback.
+            thinking.stop()
+            learning.stop()
 
 
 if __name__ == "__main__":

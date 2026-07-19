@@ -25,11 +25,19 @@ class InferenceConfiguration:
 
     Attributes:
         gpu_layers:  Number of layers to offload to GPU.
-                     0 = CPU only, -1 = all layers.
+                     0 = CPU only, -1 = as many as fit in VRAM.
+                     -1 is a deferred decision, not "all layers": the number
+                     that fits depends on the model file, and one
+                     InferenceConfiguration is shared by the reasoning and
+                     learning models, which are different sizes. Each provider
+                     resolves it against the model it is actually loading.
         n_threads:   Number of CPU threads for inference.
         n_batch:     Batch size for prompt processing.
         n_ctx:       Maximum context window size in tokens.
         backend:     Inference backend string (CPU / CUDA / HIP / Vulkan).
+        vram_bytes:  Detected VRAM on the selected GPU, or None when unknown.
+                     Passed through so a provider resolving gpu_layers=-1 can
+                     size the offload against the model it is loading.
         flash_attn:  Enable Flash Attention (faster, lower KV-cache memory).
                      Defaults OFF: it is only reliable on CUDA. On the Vulkan
                      backend (AMD / Intel) llama.cpp's flash-attention can hang
@@ -42,14 +50,12 @@ class InferenceConfiguration:
     n_ctx: int = 4096
     backend: str = "CPU"
     flash_attn: bool = False
+    vram_bytes: int | None = None
 
 
 # ---------------------------------------------------------------------------
 # Constants used by heuristics (tunable but machine-independent)
 # ---------------------------------------------------------------------------
-
-# Average VRAM consumed per offloaded layer for a ~7B Q4_K_M model (~35 MB)
-_ESTIMATED_BYTES_PER_LAYER = 35 * 1024 * 1024
 
 # Safety margin fraction kept free in VRAM for KV cache, buffers, etc.
 _VRAM_SAFETY_MARGIN = 0.85
@@ -104,7 +110,7 @@ class AutoConfigurator:
             n_threads = max(2, min(cpu.physical_cores // 2, 8))
 
         # --- GPU layers ------------------------------------------------
-        gpu_layers = AutoConfigurator._pick_gpu_layers(gpu, backend, mode)
+        gpu_layers = AutoConfigurator._pick_gpu_layers(backend)
 
         # --- Batch size ------------------------------------------------
         n_batch = AutoConfigurator._pick_batch_size(gpu, backend, mode)
@@ -124,6 +130,7 @@ class AutoConfigurator:
             n_ctx=n_ctx,
             backend=backend,
             flash_attn=flash_attn,
+            vram_bytes=gpu.vram_bytes,
         )
 
     # ------------------------------------------------------------------
@@ -151,39 +158,28 @@ class AutoConfigurator:
     # ------------------------------------------------------------------
 
     @staticmethod
-    def _pick_gpu_layers(
-        gpu: "GpuInfo",
-        backend: str,
-        mode: str,
-    ) -> int:
-        """Determine how many layers to offload to the GPU."""
+    def _pick_gpu_layers(backend: str) -> int:
+        """Decide whether to offload to the GPU at all.
+
+        Deliberately does not return a layer count. A count is only meaningful
+        against a specific model file, and this configuration is built once from
+        hardware alone and then shared by every model Athena loads. Returning
+        -1 ("as many as fit") defers the arithmetic to the provider, which knows
+        the model and can measure free VRAM at load time.
+
+        The previous implementation estimated a count here from VRAM and a
+        fixed 35 MB-per-layer constant borrowed from a 7B model. Because the
+        model size never entered the calculation, any GPU with more than ~1.3 GB
+        of VRAM was told every layer fit — so a 21 GB model on an 8 GB card
+        produced "offload everything" and llama.cpp died allocating VRAM.
+        """
         if backend == "CPU":
             return 0
 
-        vram = gpu.vram_bytes
-        if vram is None:
-            # VRAM unknown — conservative: offload a small amount
-            return 10
-
-        usable_vram = vram * _VRAM_SAFETY_MARGIN
-
-        if mode == "maximum":
-            # Offload everything
-            return -1
-
-        # Estimate how many layers fit in usable VRAM
-        max_layer_count = 999  # effectively all layers
-        estimated_layers = int(usable_vram // _ESTIMATED_BYTES_PER_LAYER)
-
-        if estimated_layers >= 32:
-            return -1  # all layers fit comfortably
-        if estimated_layers >= 20:
-            return -1 if mode == "balanced" else estimated_layers
-        if estimated_layers >= 10:
-            return estimated_layers
-
-        # Very little VRAM — offload whatever little fits
-        return max(estimated_layers, 0)
+        # Offload as much as fits. This is correct whether the model is far
+        # smaller than VRAM (everything lands on the GPU) or far larger (the
+        # remainder stays on the CPU), and needs no guess about either.
+        return -1
 
     @staticmethod
     def _pick_batch_size(

@@ -6,6 +6,6 @@ Thought pipeline, tools, memory, and learning are all bypassed — serve mode is
 pure model inference.
 """
 
-from athena.serve.openai_server import build_app
+from athena.serve.openai_server import build_app, can_serve
 
-__all__ = ["build_app"]
+__all__ = ["build_app", "can_serve"]

@@ -13,10 +13,17 @@ from pathlib import Path
 class ProviderSettings:
     """Settings for the LLM provider."""
 
-    provider: str = "llamacpp"
+    # "llamaserver" is the default because it needs no compiler: setup
+    # downloads a prebuilt llama.cpp binary (~32 MB) and Athena runs it as a
+    # child process. "llamacpp" uses the in-process llama-cpp-python bindings
+    # instead, which have to be compiled from source on Windows.
+    provider: str = "llamaserver"
     base_url: str = "http://127.0.0.1:1234"
     model: str = "qwen2.5-7b-instruct"
     temperature: float = 0.7
+
+    # Where setup places the prebuilt llama.cpp binaries (llamaserver provider).
+    runtime_directory: str = "runtime/llama"
 
     # Local GGUF model configuration.
     # Reasoning and learning models live in separate sub-folders so a small,
@@ -127,7 +134,7 @@ class AppSettings:
     """
 
     app_name: str = "Athena"
-    version: str = "0.2.0"
+    version: str = "4.1.0"
     debug: bool = False
     provider: ProviderSettings = field(default_factory=ProviderSettings)
     performance: PerformanceSettings = field(default_factory=PerformanceSettings)

@@ -1,0 +1,16 @@
+# Athena development dependencies.
+# Only needed to run the test suite — not required to use Athena.
+#
+# Install with:
+#     setup.bat -Dev
+# or, into an existing environment:
+#     .venv\Scripts\python -m pip install -r requirements-dev.txt
+#
+# Run the tests with:
+#     .venv\Scripts\python -m pytest athena
+
+# Test runner
+pytest==9.1.1
+
+# Required by fastapi.testclient.TestClient, used by the /serve mode tests
+httpx==0.28.1

@@ -14,8 +14,16 @@ from typing import Any
 from athena.config.settings import get_settings
 from athena.memory.models import MemoryEntry
 
-# Storage location for persistent semantic memory
-_SEMANTIC_MEMORY_PATH = Path(get_settings().storage.semantic_memory_path)
+def _semantic_memory_path() -> Path:
+    """Storage location for persistent semantic memory.
+
+    Read from settings on every call rather than captured at import time, so
+    that tests (and anything else that repoints storage) actually take effect.
+    A module-level constant is evaluated when the module is first imported,
+    which is almost always before a test fixture can redirect it — with the
+    result that the test suite writes into the user's real memory file.
+    """
+    return Path(get_settings().storage.semantic_memory_path)
 
 
 class SemanticMemory:
@@ -41,7 +49,7 @@ class SemanticMemory:
 
     def _ensure_storage_dir(self) -> None:
         """Create the data directory if it does not exist."""
-        _SEMANTIC_MEMORY_PATH.parent.mkdir(parents=True, exist_ok=True)
+        _semantic_memory_path().parent.mkdir(parents=True, exist_ok=True)
 
     def _serialize_entry(self, entry: MemoryEntry) -> dict:
         """Convert a MemoryEntry to a JSON-serializable dict."""
@@ -68,10 +76,10 @@ class SemanticMemory:
 
     def _load(self) -> None:
         """Load semantic memory from disk."""
-        if not _SEMANTIC_MEMORY_PATH.exists():
+        if not _semantic_memory_path().exists():
             return
         try:
-            with open(_SEMANTIC_MEMORY_PATH, "r", encoding="utf-8") as f:
+            with open(_semantic_memory_path(), "r", encoding="utf-8") as f:
                 data = json.load(f)
             entries_data = data.get("entries", [])
             self._knowledge = [self._deserialize_entry(e) for e in entries_data]
@@ -81,10 +89,10 @@ class SemanticMemory:
     def _save(self) -> None:
         """Save semantic memory to disk."""
         entries_data = [self._serialize_entry(e) for e in self._knowledge]
-        temp_path = _SEMANTIC_MEMORY_PATH.with_suffix(".json.tmp")
+        temp_path = _semantic_memory_path().with_suffix(".json.tmp")
         with open(temp_path, "w", encoding="utf-8") as f:
             json.dump({"entries": entries_data}, f, indent=2, default=str)
-        temp_path.replace(_SEMANTIC_MEMORY_PATH)
+        temp_path.replace(_semantic_memory_path())
 
     @staticmethod
     def normalize(text: str) -> str:

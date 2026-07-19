@@ -1,8 +1,18 @@
 # Athena runtime dependencies.
 # Pinned to the versions currently in use; adjust as needed.
 
-# Local GGUF model inference
-llama-cpp-python==0.3.32
+# Local GGUF model inference — OPTIONAL.
+#
+# Athena's default "llamaserver" provider runs models through the prebuilt
+# llama.cpp binaries that setup.bat downloads, so this package is NOT needed
+# and setup.bat deliberately skips it.
+#
+# It has no prebuilt Windows wheels, so installing it compiles llama.cpp from
+# source and requires Visual Studio Build Tools. Only install it if you
+# specifically want in-process inference via the "llamacpp" provider —
+# docs/SETUP.md explains how.
+#
+# llama-cpp-python==0.3.32
 
 # Hardware detection (CPU/RAM/GPU) and system snapshots
 psutil==7.2.2

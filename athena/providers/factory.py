@@ -19,6 +19,30 @@ from athena.config.settings import get_settings
 _INFERENCE_CONFIG = None
 
 
+def _local_provider_class(provider_name: str):
+    """Return the provider class backing a local GGUF model.
+
+    Both local providers run the same models with the same inference config and
+    expose the same interface; they differ only in how llama.cpp is reached —
+    a bundled ``llama-server`` subprocess, or the in-process llama-cpp-python
+    bindings.
+
+    Args:
+        provider_name: Either "llamaserver" or "llamacpp".
+
+    Returns:
+        The provider class to instantiate.
+    """
+    if provider_name == "llamaserver":
+        from athena.providers.llamaserver import LlamaServerProvider
+
+        return LlamaServerProvider
+
+    from athena.providers.llamacpp import LlamaCppProvider
+
+    return LlamaCppProvider
+
+
 def _get_inference_config():
     """Detect hardware and compute the inference config once, then cache it."""
     global _INFERENCE_CONFIG
@@ -42,8 +66,9 @@ class ProviderFactory:
     and returns the appropriate provider instance.
 
     Supported providers:
+        - "llamaserver" -> LlamaServerProvider (default; prebuilt binary)
+        - "llamacpp"  -> LlamaCppProvider (in-process; needs compilation)
         - "lmstudio"  -> LMStudioProvider
-        - "llamacpp"  -> LlamaCppProvider
         - "ollama"    -> OllamaProvider (future)
         - "openrouter" -> OpenRouterProvider (future)
 
@@ -73,9 +98,8 @@ class ProviderFactory:
 
             return LMStudioProvider()
 
-        elif provider_name == "llamacpp":
+        elif provider_name in ("llamacpp", "llamaserver"):
             from athena.providers.model_selector import resolve_model_path
-            from athena.providers.llamacpp import LlamaCppProvider
 
             config = _get_inference_config()
 
@@ -84,7 +108,9 @@ class ProviderFactory:
             reason_path = resolve_model_path(
                 get_settings().provider.reason_model_directory
             )
-            return LlamaCppProvider(
+
+            provider_class = _local_provider_class(provider_name)
+            return provider_class(
                 model_path=reason_path,
                 inference_config=config,
                 label="reasoning",
@@ -92,8 +118,8 @@ class ProviderFactory:
 
         else:
             raise ValueError(
-                f"Unknown provider: '{provider_name}'. "
-                f"Supported providers: lmstudio, llamacpp, ollama, openrouter"
+                f"Unknown provider: '{provider_name}'. Supported providers: "
+                f"llamaserver, llamacpp, lmstudio, ollama, openrouter"
             )
 
     @staticmethod
@@ -115,19 +141,26 @@ class ProviderFactory:
         """
         provider_name = get_settings().provider.provider
 
-        if provider_name == "llamacpp":
+        if provider_name in ("llamacpp", "llamaserver"):
             from athena.providers.model_selector import resolve_model_path_optional
-            from athena.providers.llamacpp import LlamaCppProvider
 
             learning_path = resolve_model_path_optional(
                 get_settings().provider.learning_model_directory
             )
             if learning_path is None:
                 # No dedicated learning model — fall back to the reasoning model.
+                print(
+                    "No dedicated learning model found — using the reasoning "
+                    "model for learning as well.\n"
+                    "      (Drop a small GGUF into "
+                    f"{get_settings().provider.learning_model_directory} to "
+                    "speed up the learning phase.)\n"
+                )
                 return reasoning_provider
 
             try:
-                return LlamaCppProvider(
+                provider_class = _local_provider_class(provider_name)
+                return provider_class(
                     model_path=learning_path,
                     inference_config=_get_inference_config(),
                     label="learning",

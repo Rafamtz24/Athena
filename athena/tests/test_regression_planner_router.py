@@ -168,14 +168,51 @@ class TestRouterStateIsolation(unittest.TestCase):
 # Full Pipeline Integration Tests
 # ─────────────────────────────────────────────────────────
 
+def _make_mock_provider() -> MagicMock:
+    """Build a provider mock the pipeline can actually run against.
+
+    A bare MagicMock returns a MagicMock from count_tokens() and
+    get_context_window(), which the context budget manager then compares
+    against an int — raising TypeError deep inside the pipeline. Giving those
+    two methods real numbers keeps the mock honest about the provider contract.
+    """
+    provider = MagicMock()
+    provider.count_tokens.side_effect = lambda text: max(1, len(str(text)) // 4)
+    provider.get_context_window.return_value = 4096
+    provider.max_tokens = 2048
+    provider.temperature = 0.7
+    return provider
+
+
 class TestPipelineStateIsolation(unittest.IsolatedAsyncioTestCase):
     """End-to-end tests using mocked provider to verify state isolation."""
 
     async def asyncSetUp(self):
-        """Create a fresh brain for each test."""
-        self.brain = AthenaBrain()
-        # Replace the real provider with a mock
-        self.mock_provider = MagicMock()
+        """Create a fresh brain for each test, backed by a mock provider.
+
+        AthenaBrain builds its providers in __init__, which loads the real GGUF
+        model from disk — so the factory is patched for the duration of
+        construction. Swapping the provider afterwards is too late: without the
+        patch these tests need a model installed just to reach the line that
+        throws the real provider away.
+        """
+        self.mock_provider = _make_mock_provider()
+
+        # The post-answer learning phase runs on its own provider. It must be a
+        # SEPARATE mock: sharing one would let learning calls consume entries
+        # from a test's generate.side_effect list, so the next user turn would
+        # receive the wrong scripted reply.
+        self.mock_learning_provider = _make_mock_provider()
+
+        with patch(
+            "athena.providers.ProviderFactory.create",
+            return_value=self.mock_provider,
+        ), patch(
+            "athena.providers.ProviderFactory.create_learning",
+            return_value=self.mock_learning_provider,
+        ):
+            self.brain = AthenaBrain()
+
         self.brain.provider = self.mock_provider
         self.brain.pipeline.provider = self.mock_provider
 

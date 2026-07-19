@@ -14,8 +14,23 @@ models/*.gguf
 # they are large and machine-specific, so ignore everything under models/.
 models/
 
+# Prebuilt llama.cpp binaries downloaded by setup.bat — platform-specific and
+# large, and always re-obtainable by re-running setup.
+runtime/
+
 # Local book PDFs for reading mode (copyright / size) — keep the folder, not the files
 books/*.pdf
 
 # Per-machine runtime preferences (e.g. the /think toggle)
 data/user_prefs.json
+
+# Personal runtime state: conversation transcripts and learned facts about the
+# user. Recreated automatically on first run, and committing them would bake
+# private data into the history where it is painful to remove later.
+data/chat_history.json
+data/working_memory.json
+data/semantic_memory.json
+
+# Per-machine Claude Code preferences (shared project settings belong in
+# .claude/settings.json instead)
+.claude/settings.local.json

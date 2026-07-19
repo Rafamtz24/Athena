@@ -6,8 +6,85 @@ No HTTP, no external server, no LM Studio required.
 """
 
 import re
+from pathlib import Path
 
 from athena.config.settings import get_settings
+from athena.providers.gguf import read_layer_count
+
+
+# Fraction of VRAM available for weights. The rest absorbs the KV cache,
+# compute buffers, and whatever the desktop compositor is already holding.
+_VRAM_USABLE_FRACTION = 0.85
+
+
+def _resolve_gpu_layers(
+    configured: int,
+    model_path: str,
+    vram_bytes: int | None,
+) -> int:
+    """Turn a gpu_layers setting into a concrete count for this model.
+
+    Only -1 ("as many as fit") needs work; an explicit count is the user's
+    decision and is passed through untouched.
+
+    The sibling llamaserver provider solves this by omitting -ngl and letting
+    llama.cpp's own fitter measure free device memory. llama-cpp-python exposes
+    no equivalent, so estimate here: weights are spread near-evenly across
+    blocks, so the share of the file that fits in usable VRAM approximates the
+    share of layers that fit.
+
+    Falls back to CPU-only when the model or VRAM cannot be measured — slow,
+    but it loads, which beats an out-of-memory abort during allocation.
+    """
+    if configured >= 0:
+        return configured
+
+    if not vram_bytes:
+        return 0
+
+    try:
+        model_bytes = Path(model_path).stat().st_size
+    except OSError:
+        return 0
+
+    layer_count = read_layer_count(model_path)
+    if not layer_count or not model_bytes:
+        return 0
+
+    usable = vram_bytes * _VRAM_USABLE_FRACTION
+    if model_bytes <= usable:
+        return layer_count
+
+    return max(int(layer_count * usable / model_bytes), 0)
+
+
+def _import_llama():
+    """Import ``llama_cpp.Llama``, or explain how to install it.
+
+    llama-cpp-python is a compiled extension and is installed separately by
+    setup.bat (it needs backend-specific build flags), so a repository that was
+    cloned and run without setup reaches this point with the module missing.
+    A bare ModuleNotFoundError gives no hint about that, so translate it into
+    instructions.
+
+    Returns:
+        The ``llama_cpp.Llama`` class.
+
+    Raises:
+        RuntimeError: If llama-cpp-python is not installed.
+    """
+    try:
+        from llama_cpp import Llama
+    except ImportError as exc:
+        raise RuntimeError(
+            "llama-cpp-python is not installed, so local models cannot be "
+            "loaded.\n\n"
+            "Run setup.bat to install it for your GPU. If you would rather "
+            "not compile it, run `setup.bat -Backend none` and use LM Studio "
+            "instead — see docs/SETUP.md."
+        ) from exc
+
+    return Llama
 
 
 def _strip_reasoning(text: str) -> str:
@@ -101,9 +178,13 @@ class LlamaCppProvider:
             self.n_ctx = inference_config.n_ctx
             self.n_threads = inference_config.n_threads
             self.n_batch = inference_config.n_batch
-            self.gpu_layers = inference_config.gpu_layers
             self.backend = inference_config.backend
             self.flash_attn = getattr(inference_config, "flash_attn", True)
+            self.gpu_layers = _resolve_gpu_layers(
+                inference_config.gpu_layers,
+                self.model_path,
+                getattr(inference_config, "vram_bytes", None),
+            )
         else:
             self.n_ctx = 4096
             self.n_threads = 4
@@ -114,7 +195,7 @@ class LlamaCppProvider:
 
         # Load model if not already resident (one load per distinct path).
         if self.model_path not in LlamaCppProvider._models:
-            from llama_cpp import Llama
+            Llama = _import_llama()
 
             print(f"Loading {label} model...")
             LlamaCppProvider._models[self.model_path] = Llama(
@@ -228,7 +309,7 @@ class LlamaCppProvider:
             self.model = LlamaCppProvider._models[self.model_path]
             return
 
-        from llama_cpp import Llama
+        Llama = _import_llama()
 
         print("Reloading learning model...")
         LlamaCppProvider._models[self.model_path] = Llama(

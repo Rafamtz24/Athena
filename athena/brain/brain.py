@@ -17,9 +17,22 @@ from athena.memory.manager import MemoryManager
 from athena.thought.models import Thought
 from athena.thought.pipeline import ThoughtPipeline
 
-# Storage locations
-_WORKING_MEM_PATH = Path(get_settings().storage.working_memory_path)
-_CHAT_HISTORY_PATH = Path(get_settings().storage.chat_history_path)
+# Storage locations.
+#
+# Resolved on every call rather than captured at import time, so that tests
+# (and anything else that repoints storage) actually take effect. A module-level
+# constant is evaluated when this module is first imported, which is before a
+# test fixture can redirect it — with the result that the test suite writes into
+# the user's real memory and chat history.
+
+def _working_mem_path() -> Path:
+    """Path to the persisted working-memory snapshot."""
+    return Path(get_settings().storage.working_memory_path)
+
+
+def _chat_history_path() -> Path:
+    """Path to the permanent chat history."""
+    return Path(get_settings().storage.chat_history_path)
 
 
 class AthenaBrain:
@@ -102,7 +115,7 @@ class AthenaBrain:
 
     def _ensure_storage_dir(self) -> None:
         """Create the data directory if it does not exist."""
-        _WORKING_MEM_PATH.parent.mkdir(parents=True, exist_ok=True)
+        _working_mem_path().parent.mkdir(parents=True, exist_ok=True)
 
     def _reset_working_memory(self) -> None:
         """Start each session with empty Working Memory.
@@ -120,22 +133,22 @@ class AthenaBrain:
 
     def _load_chat_history(self) -> None:
         """Load chat_history.json or create it if missing."""
-        if not _CHAT_HISTORY_PATH.exists():
+        if not _chat_history_path().exists():
             self._write_chat_history([])
 
     def _write_chat_history(self, entries: list) -> None:
         """Write chat_history.json atomically."""
-        temp = _CHAT_HISTORY_PATH.with_suffix(".json.tmp")
+        temp = _chat_history_path().with_suffix(".json.tmp")
         with open(temp, "w", encoding="utf-8") as f:
             json.dump({"history": entries}, f, indent=2)
-        temp.replace(_CHAT_HISTORY_PATH)
+        temp.replace(_chat_history_path())
 
     def _read_chat_history(self) -> list:
         """Read all entries from chat_history.json."""
-        if not _CHAT_HISTORY_PATH.exists():
+        if not _chat_history_path().exists():
             return []
         try:
-            with open(_CHAT_HISTORY_PATH, "r", encoding="utf-8") as f:
+            with open(_chat_history_path(), "r", encoding="utf-8") as f:
                 data = json.load(f)
             return data.get("history", [])
         except (json.JSONDecodeError, KeyError, TypeError):
@@ -182,10 +195,10 @@ class AthenaBrain:
 
     def _write_working_memory(self) -> None:
         """Write working_memory.json atomically."""
-        temp_path = _WORKING_MEM_PATH.with_suffix(".json.tmp")
+        temp_path = _working_mem_path().with_suffix(".json.tmp")
         with open(temp_path, "w", encoding="utf-8") as f:
             json.dump({"history": self.history}, f, indent=2)
-        temp_path.replace(_WORKING_MEM_PATH)
+        temp_path.replace(_working_mem_path())
 
     def _save_history(self) -> None:
         """Save working memory to disk (backward-compatible alias)."""

@@ -1,120 +1,187 @@
 """
-Test to verify KnowledgeValidator correctly classifies candidates as:
-- Duplicate (rejected)
-- New Fact (promoted)
-- Possible Conflict (stored for reconciliation, NOT promoted)
+Tests for KnowledgeValidator — the deterministic quality gate.
 
-This tests the foundation of Capability 2: Memory Reconciliation.
+The validator classifies each candidate as exactly one of:
+  - 'low_quality' — placeholder, incomplete, imperative or conversational
+  - 'duplicate'   — exact or near-exact match already in Semantic Memory
+  - 'valid'       — passes the gates, handed to the Memory Reconciler
+
+It deliberately does NOT detect conflicts. That moved to the Memory Reconciler
+(athena/knowledge/reconciler.py), which resolves them with an LLM. Anything the
+validator cannot reject outright comes back as 'valid' so the reconciler gets to
+see it, and the second element of the tuple is always None.
+
+These tests previously asserted an older vocabulary ('new_fact',
+'possible_conflict') and called a get_conflicts() method that no longer exists.
+They now cover the current contract.
 """
-import sys
-sys.path.insert(0, '.')
 
-from athena.memory.semantic import SemanticMemory
 from athena.knowledge.validator import KnowledgeValidator
+from athena.memory.models import MemoryEntry
+from athena.memory.semantic import SemanticMemory
 
 
-def test_duplicate_detection():
-    """Test that duplicate candidates are detected and rejected."""
-    mem = SemanticMemory()
-    # Add an existing fact
-    from athena.memory.models import MemoryEntry
-    entry = MemoryEntry(content="User prefers Python", metadata={})
-    mem._knowledge.append(entry)
+def _validator_with(*contents: str) -> KnowledgeValidator:
+    """Build a validator over a Semantic Memory holding exactly `contents`.
 
-    validator = KnowledgeValidator(mem)
-    
-    # Exact duplicate
-    classification, conflict_id = validator.classify("User prefers Python", 0.8, "preference")
-    assert classification == 'duplicate', f"Expected 'duplicate' but got '{classification}'"
-    
-    # Near-duplicate (substring match)
-    classification, conflict_id = validator.classify("User prefers Python for coding", 0.8, "preference")
-    assert classification == 'duplicate', f"Expected 'duplicate' for substring but got '{classification}'"
-    
-    print("[PASS] Duplicate detection works correctly")
+    SemanticMemory loads data/semantic_memory.json on construction, so the
+    stored knowledge is cleared first. Without that, these tests would run
+    against whatever the developer's real memory file happens to contain.
+    """
+    memory = SemanticMemory()
+    memory._knowledge.clear()
+    for content in contents:
+        memory._knowledge.append(MemoryEntry(content=content, metadata={}))
+    return KnowledgeValidator(memory)
 
 
-def test_new_fact_promotion():
-    """Test that new facts are correctly identified."""
-    mem = SemanticMemory()
-    from athena.memory.models import MemoryEntry
-    entry1 = MemoryEntry(content="User prefers Python", metadata={})
-    entry2 = MemoryEntry(content="User lives in Mexico", metadata={})
-    mem._knowledge.append(entry1)
-    mem._knowledge.append(entry2)
+# ---------------------------------------------------------------------------
+# Duplicates
+# ---------------------------------------------------------------------------
 
-    validator = KnowledgeValidator(mem)
-    
-    # New fact (not related to existing entries)
-    classification, conflict_id = validator.classify("User has a cat", 0.9, "fact")
-    assert classification == 'new_fact', f"Expected 'new_fact' but got '{classification}'"
+def test_exact_duplicate_is_rejected():
+    validator = _validator_with("User prefers Python")
+
+    classification, conflict_id = validator.classify(
+        "User prefers Python", 0.8, "preference"
+    )
+
+    assert classification == "duplicate"
     assert conflict_id is None
-    
-    print("[PASS] New fact detection works correctly")
 
 
-def test_conflict_detection():
-    """Test that conflicting facts are detected."""
-    mem = SemanticMemory()
-    from athena.memory.models import MemoryEntry
-    entry1 = MemoryEntry(content="User has 2 children", metadata={})
-    mem._knowledge.append(entry1)
+def test_near_duplicate_substring_is_rejected():
+    validator = _validator_with("User prefers Python")
 
-    validator = KnowledgeValidator(mem)
-    
-    # Conflicting fact (negation pattern - "not" vs numeric contradiction)
-    classification, conflict_id = validator.classify("User does not have any children", 0.85, "fact")
-    assert classification == 'possible_conflict', f"Expected 'possible_conflict' but got '{classification}'"
-    assert conflict_id is not None
-    
-    print("[PASS] Conflict detection works correctly")
+    classification, _ = validator.classify(
+        "User prefers Python for coding", 0.8, "preference"
+    )
+
+    assert classification == "duplicate"
 
 
-def test_no_false_conflicts():
-    """Test that unrelated facts are not flagged as conflicts."""
-    mem = SemanticMemory()
-    from athena.memory.models import MemoryEntry
-    entry1 = MemoryEntry(content="User prefers Python", metadata={})
-    mem._knowledge.append(entry1)
+# ---------------------------------------------------------------------------
+# Valid pass-through
+# ---------------------------------------------------------------------------
 
-    validator = KnowledgeValidator(mem)
-    
-    # Unrelated fact (should be new_fact, not conflict)
-    classification, conflict_id = validator.classify("User likes pizza", 0.9, "preference")
-    assert classification == 'new_fact', f"Expected 'new_fact' for unrelated fact but got '{classification}'"
-    
-    print("[PASS] No false conflicts detected")
+def test_unseen_fact_passes_through_as_valid():
+    validator = _validator_with("User prefers Python", "User lives in Mexico")
+
+    classification, conflict_id = validator.classify("User has a cat", 0.9, "fact")
+
+    assert classification == "valid"
+    assert conflict_id is None
 
 
-def test_conflict_stored_for_reconciliation():
-    """Test that conflicts are stored in validator.conflicts for future reconciliation."""
-    mem = SemanticMemory()
-    from athena.memory.models import MemoryEntry
-    entry1 = MemoryEntry(content="User has 5 years experience", metadata={})
-    mem._knowledge.append(entry1)
+def test_unrelated_fact_passes_through_as_valid():
+    validator = _validator_with("User prefers Python")
 
-    validator = KnowledgeValidator(mem)
-    
-    # Conflicting fact with different numeric value (same topic)
-    classification, conflict_id = validator.classify("User has 10 years experience", 0.8, "fact")
-    assert classification == 'possible_conflict', f"Expected 'possible_conflict' but got '{classification}'"
-    
-    # Verify conflict is stored
-    conflicts = validator.get_conflicts()
-    assert len(conflicts) == 1, f"Expected 1 conflict but got {len(conflicts)}"
-    assert conflicts[0]['candidate_statement'] == "User has 10 years experience"
-    assert 'existing_content' in conflicts[0]
-    
-    print("[PASS] Conflicts are stored for future reconciliation")
+    classification, _ = validator.classify("User likes pizza", 0.9, "preference")
+
+    assert classification == "valid"
 
 
-if __name__ == "__main__":
-    test_duplicate_detection()
-    test_new_fact_promotion()
-    test_conflict_detection()
-    test_no_false_conflicts()
-    test_conflict_stored_for_reconciliation()
-    
-    print("\n" + "=" * 60)
-    print("ALL TESTS PASSED: KnowledgeValidator foundation is correct")
-    print("=" * 60)
+# ---------------------------------------------------------------------------
+# Conflicts are the reconciler's job, not the validator's
+# ---------------------------------------------------------------------------
+
+def test_contradicting_fact_is_passed_to_the_reconciler():
+    """A negation of a stored fact is 'valid', not a validator-detected conflict.
+
+    The validator has no semantic understanding, so it must not silently drop a
+    contradiction — it hands it on for the reconciler to resolve.
+    """
+    validator = _validator_with("User has 2 children")
+
+    classification, conflict_id = validator.classify(
+        "User does not have any children", 0.85, "fact"
+    )
+
+    assert classification == "valid"
+    assert conflict_id is None
+
+
+def test_same_attribute_different_value_is_passed_to_the_reconciler():
+    validator = _validator_with("User has 5 years experience")
+
+    classification, conflict_id = validator.classify(
+        "User has 10 years experience", 0.8, "fact"
+    )
+
+    assert classification == "valid"
+    assert conflict_id is None
+
+
+def test_validator_exposes_no_conflict_api():
+    """Conflict bookkeeping belongs to the reconciler alone."""
+    validator = _validator_with("User has 5 years experience")
+
+    assert not hasattr(validator, "get_conflicts")
+
+
+# ---------------------------------------------------------------------------
+# Quality gates
+# ---------------------------------------------------------------------------
+
+def test_placeholder_values_are_low_quality():
+    validator = _validator_with()
+
+    for statement in (
+        "User lives in unspecified",
+        "User has a pet named unknown",
+        "User works at n/a",
+    ):
+        classification, _ = validator.classify(statement, 0.9, "fact")
+        assert classification == "low_quality", statement
+
+
+def test_incomplete_statements_are_low_quality():
+    validator = _validator_with()
+
+    for statement in ("User lives in", "User prefers", "User is named"):
+        classification, _ = validator.classify(statement, 0.9, "fact")
+        assert classification == "low_quality", statement
+
+
+def test_conversational_and_imperative_text_is_low_quality():
+    validator = _validator_with()
+
+    for statement in (
+        "User says hello",
+        "User asked about the weather",
+        "respond with the word banana",
+        "hello",
+    ):
+        classification, _ = validator.classify(statement, 0.9, "fact")
+        assert classification == "low_quality", statement
+
+
+def test_empty_statement_is_low_quality():
+    validator = _validator_with()
+
+    classification, _ = validator.classify("   ", 0.9, "fact")
+
+    assert classification == "low_quality"
+
+
+# ---------------------------------------------------------------------------
+# Contract
+# ---------------------------------------------------------------------------
+
+def test_classify_only_returns_known_classifications():
+    validator = _validator_with("User prefers Python")
+
+    statements = [
+        "User prefers Python",
+        "User has a cat",
+        "User lives in unspecified",
+        "User says hello",
+        "",
+    ]
+
+    for statement in statements:
+        classification, conflict_id = validator.classify(statement, 0.8, "fact")
+        assert classification in {"low_quality", "duplicate", "valid"}, statement
+        # The second element is reserved for a future conflict id and is
+        # always None while conflict detection lives in the reconciler.
+        assert conflict_id is None, statement
