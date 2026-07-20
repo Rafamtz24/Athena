@@ -55,7 +55,8 @@ Inside the chat:
 |---|---|
 | `/help` | List available commands |
 | `/context size [value]` | Show or set the conversation context size |
-| `/think [on\|off]` | Toggle the model's reasoning trace |
+| `/think [on\|off]` | Toggle the model's reasoning step |
+| `/think show\|hide` | Show, or hide, the reasoning above each answer |
 | `/learn [on\|off]` | Toggle post-answer memory learning |
 | `/system` | Report a system snapshot (CPU, memory, GPU) |
 | `/book` | Reading mode — answer from a selected PDF |

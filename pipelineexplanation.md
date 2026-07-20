@@ -6,7 +6,7 @@
                        ┌───────────────┴────────────────┐
                        │                                │
                        ▼                                ▼
-            Episodic Memory (Working WM)    Semantic Memory (Knowledge)
+         Working Memory (conversation)      Semantic Memory (Knowledge)
                        │                                │
                        └───────────────┬────────────────┘
                                        │
@@ -83,20 +83,21 @@
 | # | Stage | Component | Responsibility |
 |---|-------|-----------|----------------|
 | 1 | _initialize | ThoughtPipeline | Set metadata, publish ThoughtCreated |
-| 2 | _load_memory | MemoryManager | Load episodic memories into thought.memories |
-| 3 | _load_knowledge | KnowledgeManager | Retrieve Semantic Memory into thought.knowledge |
-| 4 | _plan_tool | Tool Planner | Decide if a tool is needed |
-| 5 | _execute_tool | Tool Router | Execute tool, produce ToolContext |
-| 6 | _reason | ThoughtPipeline | Publish ReasoningStarted |
-| 7 | _plan | ThoughtPipeline | Publish PlanningStarted |
-| 8 | _prepare_tools | ThoughtPipeline | Verify tool context, publish ToolsPrepared |
-| 9 | _budget_context | ContextBudgetManager | Phase 1: prune WM; Phase 2: compile packages |
-| 10 | CognitiveEngine | PromptBuilder + LLM | Render prompt from ReasoningPackage, generate response |
-| 11 | _build_response | ThoughtPipeline | Publish ResponseGenerated |
-| 12 | _extract_candidates | KnowledgeManager | Extract knowledge from LearningContextPackage |
-| 13 | _validate_knowledge | Validator + Reconciler | Quality gate → LLM reconciliation → Semantic Memory |
-| 14 | _reflect | ThoughtPipeline | Self-evaluate outcome |
-| 15 | _finalize | ThoughtPipeline | Publish ThoughtCompleted |
+| 2 | _load_knowledge | KnowledgeManager | Retrieve Semantic Memory into thought.knowledge |
+| 3 | _plan_tool | Tool Planner | Decide if a tool is needed |
+| 4 | _execute_tool | Tool Router | Execute tool, produce ToolContext |
+| 5 | _reason | ThoughtPipeline | Publish ReasoningStarted |
+| 6 | _plan | ThoughtPipeline | Publish PlanningStarted |
+| 7 | _prepare_tools | ThoughtPipeline | Verify tool context, publish ToolsPrepared |
+| 8 | _budget_context | ContextBudgetManager | Phase 1: prune WM; Phase 2: compile packages |
+| 9 | CognitiveEngine | PromptBuilder + LLM | Render prompt from ReasoningPackage, generate response |
+| 10 | _build_response | ThoughtPipeline | Publish ResponseGenerated |
+| 11 | _extract_candidates | KnowledgeManager | Extract knowledge from LearningContextPackage |
+| 12 | _validate_knowledge | Validator + Reconciler | Quality gate → LLM reconciliation → Semantic Memory |
+| 13 | _reflect | ThoughtPipeline | Self-evaluate outcome |
+| 14 | _finalize | ThoughtPipeline | Publish ThoughtCompleted |
+
+The conversation window is not loaded by a stage: `AthenaBrain` copies it onto the Thought before the pipeline runs. An episodic store that once supplied a second, verbatim copy of the same turns has been removed.
 
 ## Key Components
 

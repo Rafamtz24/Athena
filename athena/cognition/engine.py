@@ -52,7 +52,15 @@ class CognitiveEngine:
             except Exception:
                 system_prompt = None
             try:
-                response = self.provider.generate(prompt, system=system_prompt)
+                # This is the one call whose output the user is waiting on, so
+                # it is the only one that streams. Providers that predate the
+                # `stream` argument (or cannot stream) are called as before.
+                if getattr(self.provider, "supports_streaming", False):
+                    response = self.provider.generate(
+                        prompt, system=system_prompt, stream=True
+                    )
+                else:
+                    response = self.provider.generate(prompt, system=system_prompt)
                 thought.set_response(response)
             except Exception as e:
                 # Provider failed — set error trace, provide fallback response

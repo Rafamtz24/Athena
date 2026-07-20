@@ -75,6 +75,31 @@ class AthenaBrain:
         self._ensure_storage_dir()
         self._reset_working_memory()
         self._load_chat_history()
+        self._consolidate_memory()
+
+    def _consolidate_memory(self) -> None:
+        """Tidy Semantic Memory once per session, before the first answer.
+
+        Write-time gates only bind facts written after them, so a rule added
+        today never reaches what was stored yesterday. This is the pass that
+        applies the current rules to the whole store — and startup is the
+        natural moment, because it is the only point where nothing is mid-turn
+        and the cost lands before the user is waiting on an answer.
+
+        Deterministic and cheap (no model call), but it does edit the user's
+        memory, so anything it removes is reported rather than done silently.
+        Failure is non-fatal: a store that could not be tidied is still usable.
+        """
+        try:
+            from athena.knowledge.consolidator import consolidate, describe
+
+            summary = describe(consolidate(self.memory_manager.semantic_memory))
+            if summary:
+                print(summary)
+        except Exception:
+            exc_type, exc_value, exc_tb = sys.exc_info()
+            tb_str = "".join(traceback.format_exception(exc_type, exc_value, exc_tb))
+            print(f"\n[MEMORY] Consolidation failed (memory left untouched):\n{tb_str}")
 
     def answer_from_book(self, chunks: list, question: str) -> str:
         """Answer a question grounded strictly in a selected book (reading mode).
@@ -224,7 +249,6 @@ class AthenaBrain:
         1. Appends turn to chat_history.json (permanent transcript)
         2. Appends turn to working_memory.json (active context)
         3. Prunes working_memory.json to fit within csize
-        4. Stores in episodic memory
         """
         thought = Thought(user_input=message)
         
@@ -267,9 +291,9 @@ class AthenaBrain:
         # Prune conversation context to fit within csize, then save
         self._prune_to_budget()
 
-        # Store in episodic memory
-        content = f"User:\n{message}\n\nAssistant:\n{response}"
-        self.memory_manager.remember(content)
+        # The turn is already recorded twice above — chat_history.json for the
+        # permanent transcript, working_memory.json for the active window. A
+        # third verbatim copy in episodic memory added nothing but prompt bulk.
 
         # Ensure WorkingMemory is always clean for the next request
         try:

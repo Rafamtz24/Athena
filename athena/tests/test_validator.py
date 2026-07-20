@@ -165,6 +165,54 @@ def test_empty_statement_is_low_quality():
 
 
 # ---------------------------------------------------------------------------
+# Durability — a fact must outlive the session that produced it
+# ---------------------------------------------------------------------------
+
+def test_one_off_actions_are_rejected():
+    """"User did something" is a report of the session, not knowledge.
+
+    'User performs a system health check' reached the real fact store this
+    way: the extraction prompt asked for 'durable' knowledge, which is too
+    abstract to act on, and a present-tense action reads like a habit.
+    """
+    validator = _validator_with()
+
+    for statement in (
+        "User performs a system health check.",
+        "User ran a system health check",
+        "User checked the weather",
+        "User installed Python",
+        "User opened the settings menu",
+    ):
+        classification, _ = validator.classify(statement, 0.9, "fact")
+        assert classification == "low_quality", statement
+
+
+def test_habits_and_traits_survive_the_durability_gate():
+    """The gate must not eat real facts — habits and states are durable.
+
+    An action verb only means "one-off" when nothing marks it as recurring,
+    so a habitual marker keeps the statement, and a verb that merely appears
+    inside a description of the user is not an action report at all.
+    """
+    validator = _validator_with()
+
+    for statement in (
+        "User's name is Alex",
+        "User lives in Lisbon",
+        "User has a dog named Rex",
+        "Operating System is Windows 11",
+        "User runs backups every Sunday",
+        "User checks email daily",
+        "User always runs tests before committing",
+        "User's job involves running servers",
+        "User prefers dark mode",
+    ):
+        classification, _ = validator.classify(statement, 0.9, "fact")
+        assert classification == "valid", statement
+
+
+# ---------------------------------------------------------------------------
 # Contract
 # ---------------------------------------------------------------------------
 

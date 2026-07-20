@@ -102,6 +102,29 @@ class KnowledgeValidator:
         'writes', 'wrote', 'writing',
     })
 
+    # Verbs describing something the user DID, rather than something that is
+    # true of them. "User performs a system health check" is a report of this
+    # session, not knowledge — next week it is neither true nor false, just
+    # stale. The _CONVERSATIONAL_PATTERNS above catch the speech verbs ("user
+    # asks"); these catch the action verbs that slip past them.
+    _ACTION_VERBS = frozenset({
+        'performs', 'performed', 'runs', 'ran', 'executes', 'executed',
+        'checks', 'checked', 'opens', 'opened', 'starts', 'started',
+        'clicks', 'clicked', 'types', 'typed', 'installs', 'installed',
+        'downloads', 'downloaded', 'launches', 'launched',
+    })
+
+    # An action verb becomes durable knowledge when it describes a habit rather
+    # than a single occurrence, so a statement carrying one of these is kept:
+    # "User runs backups every Sunday" is a fact about the user; "User runs a
+    # backup" is a note about five minutes ago.
+    _HABITUAL_MARKERS = frozenset({
+        'every', 'always', 'usually', 'often', 'daily', 'weekly', 'monthly',
+        'yearly', 'each', 'regularly', 'typically', 'never', 'sometimes',
+        'occasionally', 'nightly', 'hourly', 'annually', 'routinely',
+        'habitually', 'frequently', 'rarely', 'seldom', 'whenever',
+    })
+
     # Common conversational tokens that should never be stored as facts
     _ECHO_TOKENS = frozenset({
         'hello', 'world', 'ok', 'okay', 'hi', 'hey', 'yes', 'no',
@@ -121,11 +144,12 @@ class KnowledgeValidator:
           1. Empty / blank
           2. Imperative commands
           3. Conversational behavior
-          4. Testing interactions
-          5. Echoed user text
-          6. Placeholder values / phrases
-          7. Incomplete facts
-          8. Vague / unresolved values
+          4. One-off actions (durability)
+          5. Testing interactions
+          6. Echoed user text
+          7. Placeholder values / phrases
+          8. Incomplete facts
+          9. Vague / unresolved values
 
         No LLM calls. Pure string/pattern matching.
         Returns True if the statement is LOW QUALITY and should be REJECTED.
@@ -150,51 +174,61 @@ class KnowledgeValidator:
             if pattern in text:
                 return True
 
-        # GATE 3 — Testing interactions
+        # GATE 3 — One-off actions: durable knowledge stays true after the
+        # session that produced it, and "User <did something>" does not.
+        # Requiring the verb in the first three words keeps this to statements
+        # ABOUT an action, not ones that merely mention one ("User's job
+        # involves running servers").
+        if not any(marker in words for marker in KnowledgeValidator._HABITUAL_MARKERS):
+            for word in words[:3]:
+                if word in KnowledgeValidator._ACTION_VERBS:
+                    return True
+
+        # GATE 4 — Testing interactions
         if text in KnowledgeValidator._TESTING_PHRASES:
             return True
         for phrase in KnowledgeValidator._TESTING_PHRASES:
             if phrase in text and len(text) < 20:
                 return True
 
-        # GATE 4 — Echoed user text
+        # GATE 5 — Echoed user text
         if len(words) == 1 and words[0] in KnowledgeValidator._ECHO_TOKENS:
             return True
 
-        # GATE 5 — Placeholder values in final position
+        # GATE 6 — Placeholder values in final position
         last_word = words[-1]
         if last_word in KnowledgeValidator._PLACEHOLDER_VALUES | KnowledgeValidator._PRONOUN_VALUES:
             return True
 
-        # GATE 6 — Multi-word placeholder phrases
+        # GATE 7 — Multi-word placeholder phrases
         for phrase in KnowledgeValidator._PLACEHOLDER_PHRASES:
             if phrase in text:
                 return True
 
-        # GATE 7 — Vague/unresolved value words anywhere
+        # GATE 8 — Vague/unresolved value words anywhere
         for w in words:
             if w in {'something', 'someone', 'somebody', 'somewhere',
                       'anything', 'anyone', 'anybody', 'anywhere',
                       'everything', 'everyone', 'everybody', 'everywhere'}:
                 return True
 
-        # GATE 8 — Standalone "x" as a word
+        # GATE 9 — Standalone "x" as a word
         if ' x ' in f' {text} ':
             return True
 
-        # GATE 9 — "unspecified" or "n/a" appearing anywhere
+        # GATE 10 — "unspecified" or "n/a" appearing anywhere
         if 'unspecified' in words or 'n/a' in words:
             return True
 
-        # GATE 10 — Patterns ending with placeholder phrasing
+        # GATE 11 — Patterns ending with placeholder phrasing
         if text.endswith(' a place') or text.endswith(' a person'):
             return True
 
-        # GATE 11 — Incomplete facts (trailing verb/preposition)
+        # GATE 12 — Incomplete facts (trailing verb/preposition)
         if last_word in KnowledgeValidator._INCOMPLETE_LAST_WORDS:
             return True
 
-        # GATE 12 — Very short statements without "User" subject
+        # GATE 13 — Very short statements without "User" subject
         if len(words) <= 2 and not text.startswith('user'):
             return True
 

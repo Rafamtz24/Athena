@@ -24,6 +24,7 @@ the box.
 """
 
 import atexit
+import json
 import os
 import secrets
 import socket
@@ -35,8 +36,9 @@ from pathlib import Path
 import requests
 
 from athena.config.settings import get_settings
+from athena.providers import reasoning_trace, streaming
 from athena.providers.gguf import read_model_info
-from athena.providers.llamacpp import _strip_reasoning
+from athena.providers.llamacpp import ReasoningStream, _strip_reasoning
 
 
 # Fraction of VRAM available for weights, leaving room for the KV cache and
@@ -250,6 +252,76 @@ def _free_port() -> int:
         return sock.getsockname()[1]
 
 
+def build_server_command(binary, model_path: str, port: int, api_key: str, config) -> list:
+    """Assemble the ``llama-server`` argument list for one model.
+
+    Separate from the process that runs it so the flags can be asserted on
+    without starting a server or loading several gigabytes of weights.
+
+    Args:
+        binary: Path to the llama-server executable.
+        model_path: GGUF file to serve.
+        port: Loopback port to bind.
+        api_key: Per-session key; the server allows all CORS origins, so
+            without one any web page could talk to this port.
+        config: InferenceConfiguration with the tuned hardware settings.
+
+    Returns:
+        The full command list, ready for subprocess.
+    """
+    command = [
+        str(binary),
+        "--model", model_path,
+        "--host", "127.0.0.1",
+        "--port", str(port),
+        "--ctx-size", str(config.n_ctx),
+        "--batch-size", str(config.n_batch),
+        "--threads", str(config.n_threads),
+        # AutoConfigurator only enables Flash Attention on CUDA: llama.cpp's
+        # Vulkan implementation can hang the GPU and trip a driver timeout.
+        # Pass the decision through explicitly rather than leaving it 'auto'.
+        "--flash-attn", "on" if config.flash_attn else "off",
+        # The model is addressed by this name in API calls, so pin it to
+        # something stable rather than the full path.
+        "--alias", Path(model_path).name,
+        "--api-key", api_key,
+        # Athena is the only client; the bundled browser UI is one more
+        # thing listening that nobody asked for.
+        "--no-webui",
+    ]
+
+    # Cap the thinking phase so it cannot consume the whole token budget and
+    # leave nothing for the answer. llama-server injects the message below in
+    # place of the model's next thought and then closes the think tag, so the
+    # model wraps up and answers instead of being cut mid-sentence. Measured
+    # with a 64-token budget: reasoning stopped at the cap, and a full answer
+    # still followed. No-op on models that do not think.
+    reasoning_budget = getattr(get_settings().provider, "reasoning_budget", -1)
+    if reasoning_budget and reasoning_budget > 0:
+        command += [
+            "--reasoning-budget", str(reasoning_budget),
+            "--reasoning-budget-message",
+            "I have thought about this enough. Time to give the answer.",
+        ]
+
+    # A negative gpu_layers means "offload as much as fits". Pinning that to
+    # a large number turns it into "offload everything", which fails outright
+    # on any model bigger than VRAM. Omitting -ngl instead hands the decision
+    # to llama.cpp's own fitter, which measures free device memory and keeps
+    # the remaining layers on the CPU. An explicit count is still honoured.
+    if config.gpu_layers >= 0:
+        command += ["--n-gpu-layers", str(config.gpu_layers)]
+    elif _should_keep_experts_on_cpu(model_path, config):
+        # Deliberately left with -ngl unset: llama.cpp then fits the
+        # remaining (non-expert) layers itself. Measured identical to
+        # forcing every layer onto the GPU, and it cannot overcommit VRAM
+        # on a model whose attention path alone exceeds it.
+        command.append("--cpu-moe")
+        print("Offloading expert layers to CPU for speed.")
+
+    return command
+
+
 class _Server:
     """A running ``llama-server`` process serving one model.
 
@@ -278,41 +350,9 @@ class _Server:
         # nothing and closes the hole properly.
         self.api_key = secrets.token_urlsafe(32)
 
-        command = [
-            str(binary),
-            "--model", model_path,
-            "--host", "127.0.0.1",
-            "--port", str(self.port),
-            "--ctx-size", str(config.n_ctx),
-            "--batch-size", str(config.n_batch),
-            "--threads", str(config.n_threads),
-            # AutoConfigurator only enables Flash Attention on CUDA: llama.cpp's
-            # Vulkan implementation can hang the GPU and trip a driver timeout.
-            # Pass the decision through explicitly rather than leaving it 'auto'.
-            "--flash-attn", "on" if config.flash_attn else "off",
-            # The model is addressed by this name in API calls, so pin it to
-            # something stable rather than the full path.
-            "--alias", Path(model_path).name,
-            "--api-key", self.api_key,
-            # Athena is the only client; the bundled browser UI is one more
-            # thing listening that nobody asked for.
-            "--no-webui",
-        ]
-
-        # A negative gpu_layers means "offload as much as fits". Pinning that to
-        # a large number turns it into "offload everything", which fails outright
-        # on any model bigger than VRAM. Omitting -ngl instead hands the decision
-        # to llama.cpp's own fitter, which measures free device memory and keeps
-        # the remaining layers on the CPU. An explicit count is still honoured.
-        if config.gpu_layers >= 0:
-            command += ["--n-gpu-layers", str(config.gpu_layers)]
-        elif _should_keep_experts_on_cpu(model_path, config):
-            # Deliberately left with -ngl unset: llama.cpp then fits the
-            # remaining (non-expert) layers itself. Measured identical to
-            # forcing every layer onto the GPU, and it cannot overcommit VRAM
-            # on a model whose attention path alone exceeds it.
-            command.append("--cpu-moe")
-            print("Offloading expert layers to CPU for speed.")
+        command = build_server_command(
+            binary, model_path, self.port, self.api_key, config
+        )
 
         # Keep the server's own logging out of Athena's console, but retain it
         # so a startup failure can be explained.
@@ -503,7 +543,11 @@ class LlamaServerProvider:
         """The filename of the loaded GGUF model (without directory)."""
         return Path(self.model_path).name
 
-    def generate(self, prompt: str, system: str | None = None) -> str:
+    supports_streaming = True
+
+    def generate(
+        self, prompt: str, system: str | None = None, stream: bool = False
+    ) -> str:
         """Generate a response from the model.
 
         Args:
@@ -511,6 +555,9 @@ class LlamaServerProvider:
             system: Optional system prompt, delivered in the `system` role so
                 the model treats it as its own instructions rather than as a
                 user claim.
+            stream: Echo tokens to the registered streaming sink as they are
+                produced. Only the answer call sets this; the planner and
+                learning calls stay silent.
 
         Returns:
             The model's answer, with any <think>…</think> reasoning stripped.
@@ -532,6 +579,9 @@ class LlamaServerProvider:
             "stream": False,
         }
 
+        if stream and streaming.active():
+            return self._generate_streaming(payload)
+
         try:
             response = requests.post(
                 f"{self.base_url}/v1/chat/completions",
@@ -545,13 +595,85 @@ class LlamaServerProvider:
             raise RuntimeError(f"The local model server failed to respond: {exc}") from exc
 
         try:
-            content = data["choices"][0]["message"]["content"]
+            message = data["choices"][0]["message"]
+            content = message["content"]
         except (KeyError, IndexError) as exc:
             raise RuntimeError(
                 f"The local model server returned an unexpected response: {data}"
             ) from exc
 
+        # llama-server parses reasoning out of the completion itself and returns
+        # it in its own field, so for most thinking models `content` arrives
+        # already clean and there are no tags left for _strip_reasoning to find.
+        # Without reading this field the trace is simply lost.
+        reasoning_trace.record(message.get("reasoning_content") or "")
+
         return _strip_reasoning(content or "")
+
+    def _generate_streaming(self, payload: dict) -> str:
+        """Run a completion over SSE, echoing tokens to the streaming sink.
+
+        llama-server sends reasoning in a separate `reasoning_content` delta,
+        but not every build does, so content deltas still go through
+        :class:`ReasoningStream` in case the tags arrive inline instead.
+
+        Returns:
+            The complete answer, reasoning excluded.
+        """
+        # return_progress makes the server report prompt-evaluation progress
+        # before any token exists. That phase is the bulk of the wait on a
+        # large model — 38s of a 45s turn, measured on a 35B with experts on
+        # the CPU — and without it the user watches an unchanging spinner.
+        # Builds that do not support the field ignore it.
+        payload = {**payload, "stream": True, "return_progress": True}
+        parser = ReasoningStream(streaming.emit)
+        reasoning_parts: list[str] = []
+
+        try:
+            with requests.post(
+                f"{self.base_url}/v1/chat/completions",
+                json=payload,
+                headers=self._auth_headers,
+                timeout=_STARTUP_TIMEOUT_SECONDS,
+                stream=True,
+            ) as response:
+                response.raise_for_status()
+                for line in response.iter_lines(decode_unicode=True):
+                    if not line or not line.startswith("data:"):
+                        continue
+                    chunk = line[len("data:"):].strip()
+                    if chunk == "[DONE]":
+                        break
+                    try:
+                        frame = json.loads(chunk)
+                        delta = frame["choices"][0].get("delta") or {}
+                    except (ValueError, KeyError, IndexError):
+                        # A malformed frame costs one token, not the answer.
+                        continue
+
+                    progress = frame.get("prompt_progress")
+                    if progress:
+                        total = progress.get("total") or 0
+                        if total:
+                            # Truncated, not rounded: the last batch reports
+                            # e.g. 1028/1029, and showing 100% while the user
+                            # still waits is the one thing a progress figure
+                            # must never do. It sits at 99% instead.
+                            percent = int(progress.get("processed", 0) / total * 100)
+                            streaming.emit("progress", str(percent))
+                        continue
+
+                    thinking = delta.get("reasoning_content")
+                    if thinking:
+                        reasoning_parts.append(thinking)
+                        streaming.emit("reasoning", thinking)
+                    parser.feed(delta.get("content") or "")
+        except requests.RequestException as exc:
+            raise RuntimeError(f"The local model server failed to respond: {exc}") from exc
+
+        answer, inline_reasoning = parser.finish()
+        reasoning_trace.record("".join(reasoning_parts) or inline_reasoning)
+        return answer
 
     def call(self, prompt: str) -> str:
         """Alias for generate() to match KnowledgeManager expectations."""

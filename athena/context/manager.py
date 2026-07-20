@@ -35,6 +35,10 @@ PRIORITY_SYSTEM_PROMPT = 95
 PRIORITY_SEMANTIC_MEMORY = 90
 PRIORITY_WORKING_MEMORY = 80
 PRIORITY_TOOL_CONTEXT = 70
+# Unused: nothing emits a chat_history source any more, because it duplicated
+# working memory. Kept so the ordering above stays readable and so a future
+# long-term-recall source (one that is genuinely not a copy of the recent
+# conversation) has an obvious place to sit.
 PRIORITY_CHAT_HISTORY = 60
 
 # Sources with these priorities are NEVER trimmed
@@ -119,8 +123,7 @@ class ContextBudgetManager:
 
         Args:
             thought: The Thought object containing all context sources
-                (user_input, history, memories, knowledge, tool_context,
-                 candidates).
+                (user_input, history, knowledge, tool_context, candidates).
 
         Returns:
             A tuple of (ReasoningContextPackage, LearningContextPackage).
@@ -220,11 +223,9 @@ class ContextBudgetManager:
             if tc.content:
                 non_wm_tokens += self._count_tokens(tc.content)
 
-        # 5. Chat History (from thought.memories)
-        chat_history = getattr(thought, 'memories', []) or []
-        if chat_history:
-            chat_text = "\n".join(str(m) for m in chat_history)
-            non_wm_tokens += self._count_tokens(chat_text)
+        # 5. Chat History is no longer rendered (see _build_sources), so it
+        #    must not be charged against the budget either — counting it here
+        #    would shrink working memory to make room for nothing.
 
         # 6. Candidates
         candidates = getattr(thought, 'candidates', None)
@@ -339,20 +340,15 @@ class ContextBudgetManager:
                     truncatable=True,
                 ))
 
-        # 6. Chat History (priority 60, may be trimmed)
-        chat_history = getattr(thought, 'memories', []) or []
-        if chat_history:
-            if isinstance(chat_history, list):
-                chat_text = "\n".join(str(m) for m in chat_history)
-            else:
-                chat_text = str(chat_history)
-            sources.append(ContextSource(
-                name="chat_history",
-                content=chat_text,
-                priority=PRIORITY_CHAT_HISTORY,
-                learning_visible=True,
-                truncatable=True,
-            ))
+        # 6. Chat History — deliberately absent.
+        #
+        # An episodic store used to supply a second copy of the conversation
+        # here, formatted differently ("User:\n…" versus "User: …"). Every
+        # exchange reached the prompt twice; models wasted reasoning asking
+        # whether the user had really said it twice, and because that store
+        # was unbounded while working memory is pruned to csize, the duplicate
+        # crowded out real context as a session went on. The store is gone —
+        # working memory is the conversation.
 
         # 7. Candidates (for prompt, priority between working memory and tool)
         candidates = getattr(thought, 'candidates', None)

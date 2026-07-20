@@ -30,7 +30,6 @@ def _count_thought_fields(thought, label):
         "tool_context": thought.tool_context,
         "response": repr(thought.get_response()),
         "metadata[stage]": thought.metadata.get("stage"),
-        "num_memories": len(thought.memories),
         "num_history": len(thought.history),
         "knowledge_len": len(str(thought.knowledge)) if thought.knowledge else 0,
         "trace_keys": list(thought.trace.keys()),

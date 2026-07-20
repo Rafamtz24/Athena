@@ -8,7 +8,8 @@ filename.
 Behaviour:
     - Zero models found  -> raise FileNotFoundError with a helpful message.
     - Exactly one model  -> use it automatically.
-    - Multiple models    -> prompt the user to pick one by number.
+    - Multiple models    -> prompt the user to pick one by number, or fall
+      back to the first (announced) when there is no stdin to ask on.
 
 The search is recursive, so models organised into sub-folders are also found.
 """
@@ -95,6 +96,9 @@ def resolve_model_path_optional(model_directory: str | Path) -> str | None:
 def _prompt_for_model(models: list[Path], base_directory: Path) -> Path:
     """Ask the user to select a model from a numbered list.
 
+    Falls back to the first model when there is nobody to ask — see
+    :func:`_choose_without_asking`.
+
     Args:
         models: Discovered model files (at least two).
         base_directory: Directory used to display concise relative names.
@@ -112,7 +116,15 @@ def _prompt_for_model(models: list[Path], base_directory: Path) -> Path:
     print()
 
     while True:
-        choice = input(f"Enter model number (1-{len(models)}): ").strip()
+        try:
+            choice = input(f"Enter model number (1-{len(models)}): ").strip()
+        except (EOFError, OSError):
+            # No usable stdin: piped input that ran out, a launcher with no
+            # console, or a test runner that captures it. Asking again would
+            # spin forever on the same EOF, and crashing here would take down
+            # a session that only needed a model chosen.
+            return _choose_without_asking(models)
+
         if choice.isdigit():
             number = int(choice)
             if 1 <= number <= len(models):
@@ -120,3 +132,23 @@ def _prompt_for_model(models: list[Path], base_directory: Path) -> Path:
                 print(f"\nSelected: {selected.name}\n")
                 return selected
         print(f"Invalid selection. Enter a number between 1 and {len(models)}.")
+
+
+def _choose_without_asking(models: list[Path]) -> Path:
+    """Pick a model when the question cannot be asked.
+
+    The first alphabetically, which is at least deterministic — the same folder
+    always yields the same choice, so a non-interactive run is reproducible.
+
+    Says so loudly rather than silently loading something the user did not
+    pick: the models in that folder can differ by tens of gigabytes, and a
+    surprise choice shows up as an out-of-memory abort or a very slow session
+    that is otherwise hard to explain.
+    """
+    selected = models[0]
+    print(
+        f"\nNo input available to choose with, so using: {selected.name}\n"
+        f"Run Athena from a terminal to pick a different one, or keep a "
+        f"single model in the folder.\n"
+    )
+    return selected

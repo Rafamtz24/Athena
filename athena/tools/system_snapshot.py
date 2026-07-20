@@ -10,10 +10,16 @@ import platform
 import socket
 import subprocess
 import sys
+from concurrent.futures import ThreadPoolExecutor
 from typing import Optional
 
 import psutil
 import cpuinfo
+
+# Ceiling on how long one section may hold up the snapshot. The individual
+# subprocess calls already pass timeout=5, so this only catches a gatherer
+# that wedges somewhere else — generous enough never to fire in normal use.
+_SECTION_TIMEOUT_SECONDS = 20
 
 
 def _run_wmic(query: str) -> str:
@@ -130,7 +136,29 @@ def _get_os_info() -> str:
 # CPU
 # ─────────────────────────────────────────
 
-def _get_cpu_info() -> str:
+def _sample_cpu_utilization() -> Optional[float]:
+    """Sample CPU load over a short window, or None if it cannot be read.
+
+    Deliberately callable on its own so the snapshot can take this reading
+    BEFORE it starts gathering everything else. The other sections spawn a
+    dozen subprocesses; sampling while they run measures Athena looking at the
+    computer rather than the computer, and reported 50% on an idle machine
+    that was actually at 1%.
+    """
+    try:
+        return psutil.cpu_percent(interval=0.5)
+    except Exception:
+        return None
+
+
+def _get_cpu_info(utilization: Optional[float] = None) -> str:
+    """Describe the CPU.
+
+    Args:
+        utilization: A load percentage already sampled by the caller. When
+            omitted this samples its own, which is correct for a standalone
+            call but not while the rest of the snapshot is running.
+    """
     lines = []
     try:
         info = cpuinfo.get_cpu_info()
@@ -161,11 +189,10 @@ def _get_cpu_info() -> str:
     except Exception:
         pass
 
-    try:
-        utilization = psutil.cpu_percent(interval=0.5)
+    if utilization is None:
+        utilization = _sample_cpu_utilization()
+    if utilization is not None:
         lines.append(f"Current utilization: {utilization}%")
-    except Exception:
-        pass
 
     return "\n".join(f"  {l}" for l in lines)
 
@@ -670,6 +697,20 @@ def _get_athena_runtime_info(
 # Main entry point
 # ─────────────────────────────────────────
 
+def _section_result(title: str, future) -> str:
+    """Return a finished section's text, or a note in place of a crash.
+
+    Each gatherer already guards its own subprocess calls, but they are now
+    running off the main thread, where an unexpected exception would surface
+    only when the result is read — and take the whole snapshot with it. One
+    unreadable section should cost that section, not the other nine.
+    """
+    try:
+        return future.result(timeout=_SECTION_TIMEOUT_SECONDS)
+    except Exception as exc:
+        return f"  Unavailable ({type(exc).__name__}: {exc})"
+
+
 def generate_system_snapshot(
     tool_prompt: str = "",
     provider_info: Optional[dict] = None,
@@ -688,17 +729,38 @@ def generate_system_snapshot(
     Returns:
         A formatted string containing the complete system snapshot.
     """
-    sections = []
-    sections.append(("Operating System", _get_os_info()))
-    sections.append(("CPU", _get_cpu_info()))
-    sections.append(("RAM", _get_ram_info()))
-    sections.append(("GPU", _get_gpu_info()))
-    sections.append(("Storage", _get_storage_info()))
-    sections.append(("Displays", _get_display_info()))
-    sections.append(("Motherboard", _get_motherboard_info()))
-    sections.append(("Power", _get_power_info()))
-    sections.append(("Network", _get_network_info()))
-    sections.append(("Athena Runtime", _get_athena_runtime_info(provider_info, memory_info)))
+    # Gathered concurrently. Almost none of this is computation — it is a
+    # dozen PowerShell and wmic processes, each costing ~0.7s just to start,
+    # and the interpreter is only waiting on them. Run sequentially the
+    # snapshot took ~15s before the model saw a single token; overlapping the
+    # waits bounds it by the slowest section instead of their sum.
+    #
+    # Threads rather than async: every gatherer is ordinary blocking
+    # subprocess code, and rewriting them would risk the hardware-specific
+    # parsing for no further gain.
+    # Taken first, on this thread, while the machine is still idle — see
+    # _sample_cpu_utilization. Costs 0.5s that cannot be overlapped, and buys
+    # a load figure that describes the computer rather than this function.
+    cpu_utilization = _sample_cpu_utilization()
+
+    gatherers = [
+        ("Operating System", _get_os_info),
+        ("CPU", lambda: _get_cpu_info(cpu_utilization)),
+        ("RAM", _get_ram_info),
+        ("GPU", _get_gpu_info),
+        ("Storage", _get_storage_info),
+        ("Displays", _get_display_info),
+        ("Motherboard", _get_motherboard_info),
+        ("Power", _get_power_info),
+        ("Network", _get_network_info),
+        ("Athena Runtime", lambda: _get_athena_runtime_info(provider_info, memory_info)),
+    ]
+
+    with ThreadPoolExecutor(max_workers=len(gatherers)) as pool:
+        futures = [(title, pool.submit(fn)) for title, fn in gatherers]
+        # Collected in declaration order, so the snapshot reads the same as it
+        # always has regardless of which section finishes first.
+        sections = [(title, _section_result(title, future)) for title, future in futures]
 
     if tool_prompt:
         sections.insert(0, ("Query", f"  {tool_prompt}"))

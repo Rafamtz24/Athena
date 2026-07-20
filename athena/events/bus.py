@@ -3,9 +3,19 @@ Athena Event Bus
 
 Provides a simple synchronous event bus for publishing events
 and subscribing/unsubscribing to receive events of specific types.
+
+The bus owns no registry of its own. Every method here forwards to the
+Dispatcher, which is the single place a subscription can live.
+
+That indirection is deliberate, and it was previously a bug: the bus kept its
+own ``_subscribers`` dict while ``publish()`` routed through the Dispatcher's
+separate registry, so a callback registered on the bus was never called. It
+failed silently — subscribing appeared to work, and the events simply never
+arrived. Two registries with one reader is not a design worth preserving, so
+the bus keeps none.
 """
 
-from typing import Any, Callable, Dict, List
+from typing import Callable
 
 from athena.events.models import Event
 
@@ -21,12 +31,10 @@ class EventBus:
 
     All operations are synchronous and run in the calling thread.
     No threading, async, queues, or background processing is used.
-    """
 
-    def __init__(self) -> None:
-        """Initialize the EventBus with empty subscriber registries."""
-        # Maps event_type string -> list of callbacks
-        self._subscribers: Dict[str, List[Callable]] = {}
+    Subscribing through the Dispatcher directly is equivalent; this class is
+    the more convenient face of it, since publishers already hold a bus.
+    """
 
     def subscribe(self, event_type: str, callback: Callable[[Event], None]) -> None:
         """
@@ -42,12 +50,9 @@ class EventBus:
         if not callable(callback):
             raise TypeError("callback must be callable")
 
-        if event_type not in self._subscribers:
-            self._subscribers[event_type] = []
+        from athena.events.dispatcher import get_dispatcher
 
-        # Avoid duplicate subscriptions
-        if callback not in self._subscribers[event_type]:
-            self._subscribers[event_type].append(callback)
+        get_dispatcher().subscribe(event_type, callback)
 
     def unsubscribe(self, event_type: str, callback: Callable[[Event], None]) -> None:
         """
@@ -57,14 +62,9 @@ class EventBus:
             event_type: The event type string to unsubscribe from.
             callback: The callback that was previously registered.
         """
-        if event_type in self._subscribers:
-            try:
-                self._subscribers[event_type].remove(callback)
-                # Clean up empty lists
-                if not self._subscribers[event_type]:
-                    del self._subscribers[event_type]
-            except ValueError:
-                pass  # Callback was not subscribed
+        from athena.events.dispatcher import get_dispatcher
+
+        get_dispatcher().unsubscribe(event_type, callback)
 
     def publish(self, event: Event) -> None:
         """
@@ -87,7 +87,9 @@ class EventBus:
 
     def get_subscriber_count(self, event_type: str) -> int:
         """Return the number of subscribers for a given event type."""
-        return len(self._subscribers.get(event_type, []))
+        from athena.events.dispatcher import get_dispatcher
+
+        return get_dispatcher().get_route_count(event_type)
 
 
 # Module-level singleton instance
@@ -100,6 +102,15 @@ def get_event_bus() -> EventBus:
 
 
 def reset_event_bus() -> None:
-    """Reset the global event bus (useful for testing)."""
+    """Drop every subscription (useful for testing).
+
+    Replacing the bus alone would clear nothing, since the bus holds no
+    state — the subscriptions live in the Dispatcher, so that is what has to
+    be reset for this to mean anything.
+    """
     global _event_bus
+
+    from athena.events.dispatcher import reset_dispatcher
+
+    reset_dispatcher()
     _event_bus = EventBus()

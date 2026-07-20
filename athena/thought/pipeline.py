@@ -11,20 +11,23 @@ EventBus integration:
 
 Pipeline stages (in order):
     1. _initialize()            — Set metadata, publish ThoughtCreated
-    2. _load_memory()           — Load episodic memories (Working Memory)
-    3. _load_knowledge()        — Retrieve Semantic Memory
-    4. _plan_tool()             — Tool Planner: decide if a tool is needed
-    5. _execute_tool()          — Tool Router: execute tool if needed
-    6. _reason()                — Publish ReasoningStarted
-    7. _plan()                  — Publish PlanningStarted
-    8. _prepare_tools()         — Verify tool context, publish ToolsPrepared
-    9. _budget_context()        — Context Budget Manager: compile context packages
-    10. CognitiveEngine         — Build prompt from Reasoning Package, call provider
-    11. _build_response()       — Publish ResponseGenerated
-    12. _extract_candidates()   — Extract knowledge candidates from Learning Package
-    13. _validate_knowledge()   — Validate and promote to Semantic Memory
-    14. _reflect()              — Self-evaluate outcome
-    15. _finalize()             — Publish ThoughtCompleted
+    2. _load_knowledge()        — Retrieve Semantic Memory
+    3. _plan_tool()             — Tool Planner: decide if a tool is needed
+    4. _execute_tool()          — Tool Router: execute tool if needed
+    5. _reason()                — Publish ReasoningStarted
+    6. _plan()                  — Publish PlanningStarted
+    7. _prepare_tools()         — Verify tool context, publish ToolsPrepared
+    8. _budget_context()        — Context Budget Manager: compile context packages
+    9. CognitiveEngine          — Build prompt from Reasoning Package, call provider
+    10. _build_response()       — Publish ResponseGenerated
+    11. _extract_candidates()   — Extract knowledge candidates from Learning Package
+    12. _validate_knowledge()   — Validate and promote to Semantic Memory
+    13. _reflect()              — Self-evaluate outcome
+    14. _finalize()             — Publish ThoughtCompleted
+
+There is no memory-loading stage: the conversation window arrives on the
+Thought already (AthenaBrain copies it in before processing), and the episodic
+store that this stage used to read has been removed.
 """
 
 import sys
@@ -52,24 +55,22 @@ class ThoughtPipeline:
 
     Pipeline Stages:
         1. _initialize()        -> publishes ThoughtCreated
-        2. _load_memory()       -> publishes MemoryLoaded
-        3. _load_knowledge()    -> publishes KnowledgeLoaded
-        4. _plan_tool()         -> publishes ToolPlanned
-        5. _execute_tool()      -> publishes ToolExecuted
-        6. _reason()            -> publishes ReasoningStarted
-        7. _plan()              -> publishes PlanningStarted
-        8. _prepare_tools()     -> publishes ToolsPrepared
-        9. _budget_context()    -> publishes ContextBudgeted
-        10. CognitiveEngine     -> PromptBuilder + provider call
-        11. _build_response()   -> publishes ResponseGenerated
-        12. _extract_candidates() -> publishes CandidatesExtracted
-        13. _validate_knowledge() -> validates & promotes to Semantic Memory
-        14. _reflect()          -> publishes ReflectionStarted
-        15. _finalize()         -> publishes ThoughtCompleted
+        2. _load_knowledge()    -> publishes KnowledgeLoaded
+        3. _plan_tool()         -> publishes ToolPlanned
+        4. _execute_tool()      -> publishes ToolExecuted
+        5. _reason()            -> publishes ReasoningStarted
+        6. _plan()              -> publishes PlanningStarted
+        7. _prepare_tools()     -> publishes ToolsPrepared
+        8. _budget_context()    -> publishes ContextBudgeted
+        9. CognitiveEngine      -> PromptBuilder + provider call
+        10. _build_response()   -> publishes ResponseGenerated
+        11. _extract_candidates() -> publishes CandidatesExtracted
+        12. _validate_knowledge() -> validates & promotes to Semantic Memory
+        13. _reflect()          -> publishes ReflectionStarted
+        14. _finalize()         -> publishes ThoughtCompleted
 
     Events published:
         - ThoughtCreated
-        - MemoryLoaded
         - KnowledgeLoaded
         - ToolPlanned
         - ToolExecuted
@@ -143,7 +144,6 @@ class ThoughtPipeline:
         try:
             # Reasoning Phase: Load memory and knowledge, generate response
             self._initialize(thought)
-            self._load_memory(thought)        # Working Memory
             self._load_knowledge(thought)     # Semantic Memory
             self._plan_tool(thought)          # Tool Planner (decides if tool needed)
             self._execute_tool(thought)       # Tool Router (executes tool if needed)
@@ -253,27 +253,6 @@ class ThoughtPipeline:
             source="thought_pipeline",
             payload={"user_input": thought.user_input},
             metadata={"stage": "initialized"},
-        )
-        bus.publish(event)
-
-    def _load_memory(self, thought: Thought) -> None:
-        """Stage 2: Load relevant episodic memories into the thought."""
-        if self.memory_manager is not None:
-            try:
-                episodic_memories = self.memory_manager.recall()
-                if episodic_memories:
-                    for mem in episodic_memories:
-                        thought.memories.append(mem.content)
-            except Exception:
-                pass
-        
-        thought.metadata["stage"] = "memory_loaded"
-        bus = get_event_bus()
-        event = Event(
-            type="MemoryLoaded",
-            source="thought_pipeline",
-            payload={"user_input": thought.user_input},
-            metadata={"stage": "memory_loaded"},
         )
         bus.publish(event)
 
@@ -585,17 +564,23 @@ class ThoughtPipeline:
     async def _validate_knowledge(self, thought: Thought) -> None:
         """Stage 7: Validate candidate facts and reconcile against Semantic Memory.
 
-        Two-phase process:
+        Three phases, each handing the next only what it could not settle:
         1. QUALITY GATE (deterministic):
-           - KnowledgeValidator rejects low-quality / placeholder facts
+           - KnowledgeValidator rejects low-quality / placeholder facts, and
+             one-off actions that will not be true next week
            - KnowledgeValidator rejects exact normalized duplicates (fast-path)
-        2. RECONCILIATION (LLM-based):
-           - MemoryReconciler compares each remaining candidate against ALL
-             existing Semantic Memory entries in a SINGLE provider call
-           - Determines: duplicate, conflict, or different
+        2. ATTRIBUTE RECONCILIATION (deterministic):
+           - Single-valued attributes (name, location, ...) resolve by
+             comparing parsed values — no model, so this is reliable on any
+             model the user has loaded
+        3. RECONCILIATION (LLM-based):
+           - Everything left goes to the model in ONE call, together with all
+             existing Semantic Memory entries
+           - Determines per candidate: duplicate, conflict, or different
            - Applies deterministic memory modifications
 
-        Provider call count: EXACTLY ONE per candidate that passes validation.
+        Provider call count: ONE per turn, plus a retry for any candidate the
+        batched response failed to classify. Not one per candidate.
         """
         if self.memory_manager is not None:
             candidates = self.memory_manager.get_candidates()

@@ -5,31 +5,70 @@ False` rather than an assertion. pytest treats a returned value as a mistake
 (PytestReturnNotNoneWarning) and a `return False` failure passed silently, so
 the checks are now plain asserts.
 
-Tests that need a loaded language model are skipped when no .gguf is present,
-which keeps the suite green on a fresh clone.
+The two end-to-end tests run against a stub provider rather than a real model.
+They were previously skipped when no .gguf was present and *failed* when one
+was — asking ProviderFactory for a provider prompts for a model when several
+are installed, and pytest captures stdin, so the prompt raised OSError. Either
+way they never actually verified anything.
+
+What they check is the wiring — that the pipeline stages hand off correctly and
+a response comes back — and that needs a provider, not inference. Stubbing it
+makes them run everywhere in milliseconds instead of loading gigabytes of
+weights. Real inference is exercised by the diagnose_* scripts, which are run
+by hand.
 """
 
 import asyncio
-import os
 from pathlib import Path
 
 import pytest
 
-from athena.config.settings import get_settings
-
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
-
-def _model_available() -> bool:
-    """True when a reasoning model is installed."""
-    directory = Path(get_settings().provider.reason_model_directory)
-    return directory.is_dir() and any(directory.rglob("*.gguf"))
+_STUB_ANSWER = "A stubbed response."
 
 
-requires_model = pytest.mark.skipif(
-    not _model_available(),
-    reason="needs a .gguf model in models/reason",
-)
+class _StubProvider:
+    """Stands in for a loaded model, for tests about plumbing rather than output.
+
+    Implements the surface the pipeline actually touches: the engine calls
+    generate(), the knowledge pipeline calls generate()/call(), and the Context
+    Budget Manager needs count_tokens() and get_context_window().
+    """
+
+    model_name = "stub-model.gguf"
+    supports_streaming = False
+
+    def generate(self, prompt, system=None, stream=False):
+        # "NONE" is the extractor's contract for "no facts here", so the
+        # learning phase runs its real code path and settles without inventing
+        # candidates from stub text.
+        if "knowledge extractor" in str(system or "").lower():
+            return "NONE"
+        return _STUB_ANSWER
+
+    def call(self, prompt):
+        return self.generate(prompt)
+
+    def count_tokens(self, text):
+        return max(1, len(str(text)) // 4)
+
+    def get_context_window(self):
+        return 4096
+
+
+@pytest.fixture
+def stub_providers(monkeypatch):
+    """Make ProviderFactory hand out stubs instead of loading a model."""
+    from athena.providers import ProviderFactory
+
+    monkeypatch.setattr(ProviderFactory, "create", staticmethod(lambda: _StubProvider()))
+    monkeypatch.setattr(
+        ProviderFactory,
+        "create_learning",
+        staticmethod(lambda reasoning_provider=None: _StubProvider()),
+    )
+    return _StubProvider
 
 
 # ---------------------------------------------------------------------------
@@ -67,7 +106,7 @@ def test_pipeline_stages():
 
     stages = [
         "_initialize",
-        "_load_memory",
+        "_load_knowledge",
         "_reason",
         "_plan",
         "_prepare_tools",
@@ -120,16 +159,19 @@ def test_memory_manager_integration():
     manager = MemoryManager()
     assert manager is not None
 
+    # Two stores: the working window and durable semantic facts. There is no
+    # remember()/recall() pair — the episodic store they belonged to held
+    # verbatim transcripts of the conversation working memory already carries.
     for method in (
         "store_working",
         "get_working",
         "clear_working",
-        "remember",
-        "recall",
         "learn",
         "query_semantic",
     ):
         assert hasattr(manager, method), f"MemoryManager missing {method}()"
+
+    assert not hasattr(manager, "remember"), "episodic store is back"
 
     manager.clear_working()
     manager.store_working("test memory entry", {"category": "test"})
@@ -142,8 +184,7 @@ def test_memory_manager_integration():
     assert manager.get_working() == []
 
 
-@requires_model
-def test_pipeline_execution():
+def test_pipeline_execution(stub_providers):
     """The pipeline runs end to end and returns a thought.
 
     ThoughtPipeline takes its collaborators by injection — a bare
@@ -182,8 +223,7 @@ def test_pipeline_execution():
     assert thought.response == response
 
 
-@requires_model
-def test_athena_brain_integration():
+def test_athena_brain_integration(stub_providers):
     """AthenaBrain.process() drives the pipeline and returns a response."""
     from athena.brain.brain import AthenaBrain
 
@@ -191,4 +231,6 @@ def test_athena_brain_integration():
 
     response = asyncio.run(brain.process("test message via AthenaBrain"))
 
-    assert response is not None
+    assert isinstance(response, str) and response.strip()
+    # The turn is recorded for the next one to see.
+    assert any("test message via AthenaBrain" in entry for entry in brain.history)

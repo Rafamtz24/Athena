@@ -190,6 +190,36 @@ def test_no_tool_specific_rules():
     print(f"[PASS] No tool-specific hardcoded rules in ContextBudgetManager")
 
 
+def test_conversation_is_not_duplicated():
+    """The conversation must appear in the prompt exactly once.
+
+    thought.memories (episodic recall) holds the same turns as thought.history
+    (working memory) in a different format. Rendering both put every exchange
+    in the prompt twice: models wasted reasoning asking whether the user had
+    really said it twice, and because episodic recall is unbounded while
+    working memory is pruned to csize, the duplicate crowded out real context
+    as a session went on.
+    """
+    exchange_user = 'User: Hi'
+    exchange_assistant = 'Assistant: Hello!'
+
+    thought = MockThought()
+    thought.history = [exchange_user, exchange_assistant]
+    # The same exchange as episodic memory records it.
+    thought.memories = ['User:\nHi\n\nAssistant:\nHello!']
+
+    rp, _ = ContextBudgetManager(MockProvider()).compile(thought)
+    prompt = PromptBuilder().build(rp)
+
+    assert 'chat_history' not in [s.name for s in rp.sources]
+    assert prompt.count('Hello!') == 1, 'conversation rendered more than once'
+    assert 'Memory' not in prompt, 'duplicate Memory section is back'
+    # Working memory is still there — it is the copy that belongs.
+    assert exchange_user in prompt
+
+    print('[PASS] Conversation appears exactly once in the prompt')
+
+
 def inspect_source(path):
     """Read source file for inspection."""
     with open(path, 'r', encoding='utf-8') as f:
@@ -200,6 +230,9 @@ if __name__ == '__main__':
     print("=" * 50)
     print("Context Budget Manager - Verification Tests")
     print("=" * 50)
+    print()
+
+    test_conversation_is_not_duplicated()
     print()
 
     test_basic_compilation()

@@ -15,6 +15,7 @@ from pathlib import Path
 # Preference key -> (settings section, attribute on that section).
 _PERSISTED_KEYS = {
     "thinking_enabled": ("provider", "thinking_enabled"),
+    "show_thinking": ("provider", "show_thinking"),
     "learning_enabled": ("learning", "enabled"),
 }
 

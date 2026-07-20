@@ -9,6 +9,7 @@ import re
 from pathlib import Path
 
 from athena.config.settings import get_settings
+from athena.providers import reasoning_trace, streaming
 from athena.providers.gguf import read_layer_count
 
 
@@ -87,8 +88,8 @@ def _import_llama():
     return Llama
 
 
-def _strip_reasoning(text: str) -> str:
-    """Remove <think>…</think> reasoning traces emitted by thinking models.
+def _split_reasoning(text: str) -> tuple[str, str]:
+    """Separate <think>…</think> reasoning traces from the answer.
 
     Thinking models (e.g. Qwen3) wrap their internal chain-of-thought in
     <think>…</think>. Some chat templates open the tag for the model, so the
@@ -104,26 +105,124 @@ def _strip_reasoning(text: str) -> str:
         text: Raw model output.
 
     Returns:
-        The user-facing answer with reasoning traces removed.
+        (answer, reasoning) — the user-facing answer, and the reasoning that
+        was removed from it (empty when the model emitted none).
     """
     if not text:
-        return text
+        return text, ""
+
+    reasoning_parts: list[str] = []
 
     # Remove complete <think>…</think> blocks anywhere in the text.
-    text = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL | re.IGNORECASE)
+    def _take(match: "re.Match[str]") -> str:
+        reasoning_parts.append(match.group(1))
+        return ""
+
+    text = re.sub(
+        r"<think>(.*?)</think>", _take, text, flags=re.DOTALL | re.IGNORECASE
+    )
 
     # A stray closing tag means the opening was emitted by the template;
     # everything before it is reasoning.
     lowered = text.lower()
     if "</think>" in lowered:
-        text = text[lowered.rindex("</think>") + len("</think>"):]
+        cut = lowered.rindex("</think>")
+        reasoning_parts.append(text[:cut])
+        text = text[cut + len("</think>"):]
 
     # An unterminated opening tag means thinking was cut off before an answer.
     lowered = text.lower()
     if "<think>" in lowered:
-        text = text[: lowered.index("<think>")]
+        cut = lowered.index("<think>")
+        reasoning_parts.append(text[cut + len("<think>"):])
+        text = text[:cut]
 
-    return text.strip()
+    reasoning = "\n\n".join(p.strip() for p in reasoning_parts if p.strip())
+    return text.strip(), reasoning
+
+
+def _strip_reasoning(text: str) -> str:
+    """Return `text` with reasoning traces removed, recording them for
+    `/think show`. See :func:`_split_reasoning` for the parsing rules."""
+    answer, reasoning = _split_reasoning(text)
+    if reasoning:
+        reasoning_trace.record(reasoning)
+    return answer
+
+
+_OPEN_TAG = "<think>"
+_CLOSE_TAG = "</think>"
+
+
+def _held_back(text: str) -> int:
+    """Length of the trailing run that might be the start of a think tag.
+
+    A tag can straddle two deltas ("<thi" + "nk>"), so the tail of each delta
+    is held until the next one proves it is ordinary text. Returns how many
+    characters to keep back.
+    """
+    lowered = text.lower()
+    for size in range(min(len(lowered), len(_CLOSE_TAG) - 1), 0, -1):
+        tail = lowered[-size:]
+        if _OPEN_TAG.startswith(tail) or _CLOSE_TAG.startswith(tail):
+            return size
+    return 0
+
+
+class ReasoningStream:
+    """Splits a stream of deltas into reasoning and answer as it arrives.
+
+    The batch version (:func:`_split_reasoning`) can look at the whole output
+    before deciding; a stream cannot, so this tracks whether it is currently
+    inside a <think> block and holds back any trailing partial tag.
+
+    Qwen-style templates prefill the opening <think> into the prompt, so the
+    completion begins *inside* reasoning and only ever emits the closing tag.
+    ``starts_inside`` covers that: without it the whole trace would stream out
+    as if it were the answer.
+    """
+
+    def __init__(self, emit, starts_inside: bool = False):
+        self._emit = emit
+        self._inside = starts_inside
+        self._pending = ""
+        self._answer: list[str] = []
+        self._reasoning: list[str] = []
+
+    def feed(self, delta: str) -> None:
+        """Consume one delta, emitting whatever can be classified now."""
+        if not delta:
+            return
+        self._pending += delta
+
+        while self._pending:
+            tag = _CLOSE_TAG if self._inside else _OPEN_TAG
+            index = self._pending.lower().find(tag)
+            if index == -1:
+                keep = _held_back(self._pending)
+                split = len(self._pending) - keep
+                self._out(self._pending[:split])
+                self._pending = self._pending[split:]
+                return
+            self._out(self._pending[:index])
+            self._pending = self._pending[index + len(tag):]
+            self._inside = not self._inside
+
+    def finish(self) -> tuple[str, str]:
+        """Flush anything held back and return (answer, reasoning)."""
+        self._out(self._pending)
+        self._pending = ""
+        return "".join(self._answer).strip(), "".join(self._reasoning).strip()
+
+    def _out(self, text: str) -> None:
+        if not text:
+            return
+        if self._inside:
+            self._reasoning.append(text)
+            self._emit("reasoning", text)
+        else:
+            self._answer.append(text)
+            self._emit("answer", text)
 
 
 class LlamaCppProvider:
@@ -218,7 +317,11 @@ class LlamaCppProvider:
 
         return Path(self.model_path).name
 
-    def generate(self, prompt: str, system: str | None = None) -> str:
+    supports_streaming = True
+
+    def generate(
+        self, prompt: str, system: str | None = None, stream: bool = False
+    ) -> str:
         """
         Generate a response from the local GGUF model.
 
@@ -228,6 +331,8 @@ class LlamaCppProvider:
                 the model treats it as its own identity/instructions rather
                 than as a user claim. Without this, the base model's built-in
                 system identity (e.g. "You are Qwen") stays in force.
+            stream: Echo tokens to the registered streaming sink as they are
+                produced. Only the answer call sets this.
 
         Returns:
             The LLM response text.
@@ -235,6 +340,11 @@ class LlamaCppProvider:
         Raises:
             RuntimeError: If the model fails to generate a response.
         """
+        # Note: settings.provider.reasoning_budget is not honoured here.
+        # llama-server enforces it with --reasoning-budget; llama-cpp-python
+        # exposes no equivalent, so on this provider a runaway thinking model
+        # can still spend the whole max_tokens budget before answering.
+
         # Read the thinking toggle live so `/think on|off` takes effect on the
         # next call without reloading the model.
         thinking_enabled = getattr(get_settings().provider, "thinking_enabled", True)
@@ -244,6 +354,9 @@ class LlamaCppProvider:
         if system:
             messages.append({"role": "system", "content": system})
         messages.append({"role": "user", "content": user_content})
+
+        if stream and streaming.active():
+            return self._generate_streaming(messages)
 
         response = self.model.create_chat_completion(
             messages=messages,
@@ -259,6 +372,30 @@ class LlamaCppProvider:
             ) from e
 
         return _strip_reasoning(content)
+
+    def _generate_streaming(self, messages: list) -> str:
+        """Run a completion token by token, echoing to the streaming sink.
+
+        Returns:
+            The complete answer, reasoning excluded.
+        """
+        parser = ReasoningStream(streaming.emit)
+
+        for chunk in self.model.create_chat_completion(
+            messages=messages,
+            temperature=self.temperature,
+            max_tokens=self.max_tokens,
+            stream=True,
+        ):
+            try:
+                delta = chunk["choices"][0].get("delta") or {}
+            except (KeyError, IndexError):
+                continue
+            parser.feed(delta.get("content") or "")
+
+        answer, reasoning = parser.finish()
+        reasoning_trace.record(reasoning)
+        return answer
 
     def call(self, prompt: str) -> str:
         """Alias for generate() to match KnowledgeManager expectations."""

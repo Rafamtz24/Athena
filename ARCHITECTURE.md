@@ -20,7 +20,6 @@ athena/
 │   ├── models.py              # ContextSource, ReasoningContextPackage, LearningContextPackage
 │   └── manager.py             # Context Budget Manager
 ├── memory/
-│   ├── episodic.py            # Episodic memory (past experiences)
 │   ├── semantic.py            # Semantic memory (durable facts)
 │   ├── working.py             # Working memory (sliding window + candidate storage)
 │   └── manager.py             # MemoryManager (coordinates all memory systems)
@@ -28,7 +27,8 @@ athena/
 │   ├── models.py              # Knowledge data models
 │   ├── manager.py             # KnowledgeManager (extraction, retrieval)
 │   ├── validator.py           # KnowledgeValidator (quality gate)
-│   └── reconciler.py          # MemoryReconciler (LLM-based conflict resolution)
+│   ├── reconciler.py          # MemoryReconciler (write-time conflict resolution)
+│   └── consolidator.py        # Consolidator (periodic cleanup of stored facts)
 ├── planner/
 │   ├── models.py              # PlannerDecision data model
 │   └── planner.py             # Tool Planner (decides if a tool is needed)
@@ -54,9 +54,27 @@ athena/
 │   └── models.py              # Event data models
 ├── logging/
 │   └── logger.py              # Structured logging
-└── debug/
-    └── manager.py             # Debug utilities
+├── debug/
+│   └── manager.py             # Debug utilities
+└── tests/
+    ├── test_*.py              # The pytest suite — every test lives here
+    └── diagnose_*.py          # Manual scripts, NOT collected by pytest
 ```
+
+Tests live in `athena/tests/` and nowhere else. They used to sit in both that
+directory and beside the code they covered, which meant no single place
+answered "is this covered?". Source packages now contain source only.
+
+The two prefixes are a real distinction, not a style preference. `test_*` is
+collected by pytest and must be safe to run unattended. `diagnose_*` is run by
+hand and may be destructive — several load a real model, and
+`diagnose_memory_reconciliation.py` clears the semantic memory store to set up
+its scenarios. Naming one like the other is how someone loses their memory
+file to a routine test run.
+
+`conftest.py` at the project root points every persistent store at a temporary
+directory for the duration of a run, so the collected suite cannot write to
+real user data even when a test drives a full AthenaBrain.
 
 ## Core Architecture
 
@@ -75,7 +93,6 @@ The Brain is the coordinator. It:
 A Thought is the temporary cognitive workspace for one interaction. It carries:
 - `user_input` — The raw user input
 - `history` — Working Memory / conversation history
-- `memories` — Episodic memories
 - `knowledge` — Semantic Memory retrieval
 - `planner_decision` / `planner_decisions` — Output of the Tool Planner (primary decision, and the full list when tools are chained)
 - `tool_context` / `tool_contexts` — ToolContext(s) produced by the Tool Router (primary, and the full list when tools are chained)
@@ -87,25 +104,26 @@ A Thought is the temporary cognitive workspace for one interaction. It carries:
 
 ### Thought Pipeline (`athena/thought/pipeline.py`)
 
-The pipeline processes a single interaction through 15 stages:
+The pipeline processes a single interaction through 14 stages:
 
 1. `_initialize()` — Set metadata, publish ThoughtCreated
-2. `_load_memory()` — Load episodic memories
-3. `_load_knowledge()` — Retrieve Semantic Memory
-4. `_plan_tool()` — Tool Planner: decide which tool(s) are needed
-5. `_execute_tool()` — Tool Router: execute the planned tool(s) if any
-6. `_reason()` — Publish ReasoningStarted
-7. `_plan()` — Publish PlanningStarted
-8. `_prepare_tools()` — Verify tool context, publish ToolsPrepared
-9. `_budget_context()` — **Context Budget Manager** (two-phase):
+2. `_load_knowledge()` — Retrieve Semantic Memory
+3. `_plan_tool()` — Tool Planner: decide which tool(s) are needed
+4. `_execute_tool()` — Tool Router: execute the planned tool(s) if any
+5. `_reason()` — Publish ReasoningStarted
+6. `_plan()` — Publish PlanningStarted
+7. `_prepare_tools()` — Verify tool context, publish ToolsPrepared
+8. `_budget_context()` — **Context Budget Manager** (two-phase):
    - Phase 1: Compute Working Memory budget, call `WorkingMemory.prune()`
    - Phase 2: Compile Reasoning and Learning packages
-10. `CognitiveEngine` — PromptBuilder renders ReasoningPackage → provider generates response
-11. `_build_response()` — Publish ResponseGenerated
-12. `_extract_candidates()` — KnowledgeExtractor consumes LearningContextPackage
-13. `_validate_knowledge()` — Validate + reconcile candidates against Semantic Memory
-14. `_reflect()` — Self-evaluate outcome
-15. `_finalize()` — Publish ThoughtCompleted
+9. `CognitiveEngine` — PromptBuilder renders ReasoningPackage → provider generates response
+10. `_build_response()` — Publish ResponseGenerated
+11. `_extract_candidates()` — KnowledgeExtractor consumes LearningContextPackage
+12. `_validate_knowledge()` — Validate + reconcile candidates against Semantic Memory
+13. `_reflect()` — Self-evaluate outcome
+14. `_finalize()` — Publish ThoughtCompleted
+
+There is no memory-loading stage. The conversation window is already on the Thought when the pipeline starts (`AthenaBrain` copies it in), and the episodic store that this stage read has been removed — it held verbatim transcripts of the same turns, which reached the prompt as a second copy.
 
 ### Context Budget Manager (`athena/context/manager.py`)
 
@@ -147,17 +165,21 @@ Working Memory is **session-scoped**: it is the sliding window of the *current* 
 
 ### Memory System (`athena/memory/`)
 
-Three types of memory, accessed through `MemoryManager`:
-- **Episodic**: Past experiences and events (`remember()` / `recall()`)
+Two types of memory, accessed through `MemoryManager`:
 - **Semantic**: Durable facts consulted during reasoning (`learn()` / `query_semantic()`)
 - **Working**: Temporary context + candidate storage (`store()` / `retrieve()` / `clear()`)
 
+An **Episodic** store sat alongside these, holding verbatim `User: …/Assistant: …` transcripts. It was removed: it was never persisted, so it could not serve long-term recall, and what it held was the conversation Working Memory already carries — so it reached the prompt as a second copy of every turn. Storing transcripts verbatim is a known dead end for agent memory; the durable part of an exchange is the fact it established, which is what Semantic Memory keeps.
+
 ### Knowledge System (`athena/knowledge/`)
 
-Two-phase knowledge pipeline:
-1. **Extractor** (`KnowledgeManager.extract_candidates()`) — Consumes a `LearningContextPackage` and produces KnowledgeCandidates via an LLM call
-2. **Validator** (`KnowledgeValidator`) — Deterministic quality gate (rejects low-quality / duplicate facts)
-3. **Reconciler** (`MemoryReconciler`) — LLM-based comparison against existing Semantic Memory (duplicate, conflict, or new)
+Knowledge pipeline, ordered so each phase hands the next only what it could not settle deterministically:
+1. **Extractor** (`KnowledgeManager.extract_candidates()`) — Consumes a `LearningContextPackage` and produces KnowledgeCandidates via an LLM call. Gated by a regex pre-check, so greetings and acknowledgements cost nothing.
+2. **Validator** (`KnowledgeValidator`) — Deterministic quality gate. Rejects low-quality and duplicate facts, and applies the durability test: a fact must still be true next week, so "User ran a backup" is rejected while "User runs backups every Sunday" is kept.
+3. **Reconciler** (`MemoryReconciler`) — Two passes. Single-valued attributes (name, location, OS) resolve by comparing parsed values with no model at all; everything left is classified in **one** batched LLM call per turn, not one per candidate. A candidate the batch fails to classify is retried alone rather than guessed at.
+4. **Consolidator** (`consolidator.py`) — Runs once at startup over the whole store. Every other phase runs at write time and so binds only future facts; this is the pass that applies today's rules to what was stored yesterday, dropping entries the gates now reject, exact duplicates, and outdated values of single-valued attributes. Deterministic, so it never needs a model and cannot delete a good fact through a bad generation.
+
+Without phase 4 a fact store only accumulates, which is the documented failure mode for agent memory: stale entries crowd the retrieval budget and contradictions build up silently.
 
 ### Tool System (`athena/tools/`)
 
@@ -205,6 +227,12 @@ All providers implement `LLMProvider` (abstract base):
 - `count_tokens(text)` — Count tokens using the provider's native tokenizer
 - `get_context_window()` — Get the maximum context window size in tokens
 
+**Reasoning traces and streaming.** Thinking models produce a chain-of-thought that never belongs in the answer, so providers always separate the two. The split happens two ways because the backends differ: the in-process provider parses `<think>…</think>` out of the completion itself, while llama-server parses it server-side and returns it in a separate `reasoning_content` field. Both feed `providers/reasoning_trace.py`, which the terminal drains for `/think show`.
+
+The answer call streams token by token through `providers/streaming.py` — a module-level sink the terminal registers, so the layers between it and the provider (brain, pipeline, engine) do not have to relay output. Only `CognitiveEngine`'s call passes `stream=True`; the planner and learning calls run through the same providers silently. Providers advertise support with `supports_streaming`, so a provider without it is called exactly as before.
+
+The sink also carries prompt-evaluation progress (`return_progress` on llama-server), which the terminal turns into a spinner label rather than output. That phase — the model reading the prompt before any token exists — was measured at 38s of a 45s turn on a 35B with experts on the CPU, and is the bulk of what used to look like a hang. Tool execution is named from the `ToolPlanned` event, so the terminal reports stages by subscribing to the existing event bus rather than by the pipeline calling into it.
+
 Supported providers:
 - **LlamaCppProvider** — Local GGUF model inference via `llama-cpp-python`. Uses actual tokenizer for `count_tokens()`.
 - **LMStudioProvider** — HTTP API to LM Studio local server. Uses heuristic for `count_tokens()`.
@@ -217,6 +245,10 @@ A pure renderer. Receives a `ReasoningContextPackage` and renders it into a form
 
 Publish-subscribe event system for decoupled module communication. Each pipeline stage publishes a corresponding event.
 
+`EventBus` is the public face; the `Dispatcher` holds the one and only subscription registry, and every bus method forwards to it. Subscribe through either — they are the same registry. (They were not always: the bus used to keep a second `_subscribers` dict that publishing never read, so bus subscribers were silently never called.)
+
+Consumers: the terminal subscribes to `ToolPlanned` / `ToolExecuted` to name the phase the spinner is showing. `logging/logger.py` can mirror every event to the console via `subscribe_logger_to_bus()`, which is opt-in — it prints roughly eight lines per turn, which belongs in a debugging session and not in an answer.
+
 ## Data Flow
 
 ```
@@ -224,9 +256,6 @@ User → AthenaBrain.process(message)
               │
               ▼
         Create Thought
-              │
-              ▼
-    _load_memory() → Episodic Memory
               │
               ▼
     _load_knowledge() → Semantic Memory

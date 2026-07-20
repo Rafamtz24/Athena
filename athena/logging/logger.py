@@ -3,7 +3,9 @@ Athena Structured Logger Module
 
 Provides a centralized logger instance used throughout the Athena AI platform.
 Uses Python's standard logging module with structured formatting.
-Subscribes to the EventBus to log all events that are published.
+
+Can also mirror every EventBus event to the console for debugging, via
+subscribe_logger_to_bus() — opt-in, see that function for why.
 """
 
 import logging
@@ -58,16 +60,27 @@ def _event_callback(event: Event) -> None:
 
 
 def subscribe_logger_to_bus(bus=None) -> None:
-    """Subscribe the logger to the EventBus so it receives all events."""
+    """Log every pipeline event to the console. Opt-in — call it to enable.
+
+    NOT called on import, deliberately. This subscription existed from the
+    start but never fired: the bus registered callbacks in a dict that
+    publishing did not read, so the logging silently never happened. Fixing
+    that plumbing would have switched this on for the first time, and what it
+    does is emit one INFO line per event — eight or so per turn, echoing the
+    user's own input back at them, interleaved with the answer as it streams.
+
+    Nothing has missed it in the meantime: the stages worth announcing already
+    log directly (see CognitiveEngine). So it stays available for debugging a
+    pipeline problem, and off by default.
+    """
     if bus is None:
         bus = get_event_bus()
 
-    # Subscribe to a wildcard or common event type pattern
-    # The logger subscribes to all events by listening to a general "AllEvents" channel
-    # and also subscribes to specific event types individually
     event_types = [
         "ThoughtCreated",
-        "MemoryLoaded",
+        "KnowledgeLoaded",
+        "ToolPlanned",
+        "ToolExecuted",
         "ReasoningStarted",
         "PlanningStarted",
         "ToolsPrepared",
@@ -82,6 +95,3 @@ def subscribe_logger_to_bus(bus=None) -> None:
 
 # Default logger instance for convenience
 logger = _get_logger()
-
-# Subscribe logger to the event bus by default
-subscribe_logger_to_bus()

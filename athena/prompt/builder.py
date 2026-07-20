@@ -195,21 +195,9 @@ class PromptBuilder:
             for item in thought.history:
                 lines.append(item)
 
-        lines.extend([
-            "",
-            "====================",
-            "",
-            "Memory",
-            "",
-            "====================",
-            "",
-        ])
-
-        if not thought.memories:
-            lines.append("(None)")
-        else:
-            for memory in thought.memories:
-                lines.append(memory)
+        # No Memory section: it rendered an episodic store that repeated the
+        # Conversation above in a different format. See
+        # ContextBudgetManager._build_sources.
 
         lines.extend([
             "",

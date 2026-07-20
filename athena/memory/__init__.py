@@ -2,7 +2,7 @@
 Athena Memory Package
 
 Architectural foundation for Athena's memory system.
-Provides abstractions for working, episodic, and semantic memory.
+Provides abstractions for working and semantic memory.
 All memory systems are managed through MemoryManager.
 """
 

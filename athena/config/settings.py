@@ -35,18 +35,46 @@ class ProviderSettings:
     learning_model_directory: str = "models/learning"
     reasoning_model: str = "qwen2.5-7b-instruct-q4_k_m.gguf"
 
-    # Hard cap on tokens generated per call. Prevents "thinking" models
-    # (which emit long <think>…</think> traces) from generating unbounded
-    # output and appearing to hang — including on the silent learning-phase
-    # calls that run after each response.
+    # Hard cap on tokens generated per call, covering reasoning AND answer
+    # together. Prevents a model from generating unbounded output and
+    # appearing to hang — including on the silent learning-phase calls that
+    # run after each response.
+    #
+    # Read with `reasoning_budget` below: that one bounds the reasoning half,
+    # so the answer is guaranteed the difference. Raising one without the
+    # other changes how much room the answer actually has.
     max_tokens: int = 2048
 
     # Whether "thinking" models are allowed to emit their <think>…</think>
     # reasoning trace. When False, the Qwen3 `/no_think` soft-switch is sent
     # so the model answers directly (faster). Toggle at runtime with
-    # `/think on` and `/think off`. Reasoning is stripped from output either
-    # way; this only controls whether the model spends tokens producing it.
+    # `/think on` and `/think off`. Reasoning is stripped from the answer
+    # either way; this only controls whether the model spends tokens on it.
     thinking_enabled: bool = True
+
+    # Ceiling on the tokens a thinking model may spend on reasoning, before
+    # it is made to close the thought and answer. Reasoning and answer share
+    # `max_tokens`, so an unbounded trace can starve the reply it was meant to
+    # produce — a measured turn spent 1830 of 2048 tokens re-deriving the same
+    # sentence and only just finished in time.
+    #
+    # 1024 is chosen from observed traces: typical reasoning runs ~135-340
+    # tokens, so this never touches a normal turn, while leaving ~1000 tokens
+    # of `max_tokens` for the answer no matter how badly a model loops.
+    # Set to -1 for no limit.
+    #
+    # Enforced by llama-server (--reasoning-budget), which injects a wrap-up
+    # message and closes the thought rather than cutting mid-sentence, so the
+    # model still answers. The in-process llamacpp provider has no equivalent
+    # control, and ignores this.
+    reasoning_budget: int = 1024
+
+    # Whether the stripped reasoning trace is printed above each answer.
+    # Toggle at runtime with `/think show` and `/think hide`. Off by default:
+    # traces are long, and most turns want the answer alone. Only meaningful
+    # while `thinking_enabled` is True — a model told `/no_think` has no
+    # reasoning to show.
+    show_thinking: bool = False
 
 
 @dataclass(frozen=False)

@@ -87,7 +87,6 @@ async def debug_last_thought():
         "id": thought.id,
         "user_input": thought.user_input,
         "history": thought.history,
-        "memories": thought.memories,
         "knowledge": thought.knowledge,
         "plan": thought.plan,
         "response": thought.get_response(),

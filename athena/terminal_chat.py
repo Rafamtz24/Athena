@@ -11,6 +11,7 @@ Commands:
     /context size           Display current conversation context size
     /context size <value>   Update conversation context size immediately
     /think [on|off]         Toggle thinking-model reasoning (default on)
+    /think show|hide        Show, or hide, the reasoning trace (default hide)
     /learn [on|off]         Toggle post-answer memory learning (default on)
     /system                 Report a system snapshot (CPU, memory, GPU)
     /book                   Enter reading mode (answer from a selected PDF)
@@ -29,6 +30,7 @@ import threading
 
 from athena.brain.brain import AthenaBrain
 from athena.config.settings import get_settings
+from athena.providers import reasoning_trace, streaming
 
 
 class _ActivityIndicator:
@@ -45,8 +47,16 @@ class _ActivityIndicator:
 
     def __init__(self, label: str = "Learning") -> None:
         self.label = label
+        # Widest label shown so far. Every frame is padded to it, so switching
+        # to a shorter label cannot leave the tail of a longer one on screen.
+        self._width = len(label)
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
+
+    def set_label(self, label: str) -> None:
+        """Change the label mid-spin, to name the phase now running."""
+        self.label = label
+        self._width = max(self._width, len(label))
 
     def start(self) -> None:
         self._stop.clear()
@@ -57,8 +67,9 @@ class _ActivityIndicator:
         for dots in itertools.cycle([".", "..", "..."]):
             if self._stop.is_set():
                 break
+            frame = f"{self.label}{dots}"
             # Trailing spaces clear leftovers from the previous (longer) frame.
-            sys.stdout.write(f"\r{self.label}{dots}   ")
+            sys.stdout.write("\r" + frame.ljust(self._width + 3) + "   ")
             sys.stdout.flush()
             if self._stop.wait(0.4):
                 break
@@ -70,7 +81,7 @@ class _ActivityIndicator:
         self._thread.join(timeout=1)
         self._thread = None
         # Erase the indicator line so the next prompt starts clean.
-        sys.stdout.write("\r" + " " * (len(self.label) + 6) + "\r")
+        sys.stdout.write("\r" + " " * (self._width + 6) + "\r")
         sys.stdout.flush()
 
 
@@ -88,7 +99,8 @@ def _persist_pref(key: str, value) -> None:
 _HELP_TEXT = """
 Athena commands:
   /help                 Show this list of commands
-  /think [on|off]       Toggle the model's visible reasoning (default on)
+  /think [on|off]       Toggle the model's reasoning step (default on)
+  /think show|hide      Show, or hide, that reasoning above each answer
   /learn [on|off]       Toggle memory learning after each answer (default on)
   /context size [n]     Show, or set, the conversation context size
   /system               Report a system snapshot (CPU, memory, GPU)
@@ -98,6 +110,144 @@ Athena commands:
                         API for external clients like Open WebUI (default port 8080)
   exit, quit            Leave Athena
 """
+
+
+# Tools that keep the user waiting long enough to be worth naming. The planner
+# itself is rule-based and returns in microseconds, so there is no "Planning"
+# phase worth showing — the wait is the tool call, and then the model.
+_TOOL_LABELS = {
+    "web": "Searching the web",
+    "system": "Checking the system",
+    "weather": "Checking the weather",
+}
+
+
+class _PhaseLabels:
+    """Renames the spinner as the pipeline moves between stages.
+
+    The pipeline already publishes an event per stage, so this subscribes
+    rather than adding reporting calls to the pipeline itself.
+
+    Events fire *after* their stage finishes, so each one names the phase being
+    entered, not the one that just ended: once the tool plan exists the tool is
+    what runs next, and once it has run the model is.
+
+    Subscriptions are per-turn — book, tarot and serve modes drive the same
+    pipeline without this spinner, and a stale subscriber would relabel an
+    indicator that is not running.
+    """
+
+    def __init__(self, spinner: "_ActivityIndicator") -> None:
+        self._spinner = spinner
+        self._events = ("ToolPlanned", "ToolExecuted")
+
+    def subscribe(self) -> None:
+        from athena.events.bus import get_event_bus
+
+        bus = get_event_bus()
+        for event_type in self._events:
+            bus.subscribe(event_type, self._on_event)
+
+    def unsubscribe(self) -> None:
+        from athena.events.bus import get_event_bus
+
+        bus = get_event_bus()
+        for event_type in self._events:
+            bus.unsubscribe(event_type, self._on_event)
+
+    def _on_event(self, event) -> None:
+        if event.type == "ToolPlanned":
+            tools = (event.payload or {}).get("decision_tools") or []
+            for tool in tools:
+                if tool in _TOOL_LABELS:
+                    self._spinner.set_label(_TOOL_LABELS[tool])
+                    return
+            return
+        # The tool is done; what remains is the model reading the prompt and
+        # answering, which is where most of the wait actually goes.
+        self._spinner.set_label("Thinking")
+
+
+class _LiveOutput:
+    """Prints model tokens as they arrive, for one turn.
+
+    Two things have to happen at the first token rather than up front: the
+    "Thinking" spinner has to stop (it and the stream both own the cursor), and
+    the section header has to be printed. Doing either eagerly would leave a
+    stray header on turns that fail before generating anything.
+
+    Reasoning is only echoed when `/think show` is on. When it is off the
+    spinner keeps running through the reasoning phase, which is exactly the old
+    behaviour — the wait is unchanged, only now the answer streams out of it.
+    """
+
+    def __init__(self, spinner: "_ActivityIndicator") -> None:
+        self._spinner = spinner
+        self._section: str | None = None
+        self._generating = False
+        self.printed = False
+
+    def __call__(self, kind: str, text: str) -> None:
+        if kind == "progress":
+            # Still reading the prompt — nothing to print, but the spinner can
+            # say how far along it is instead of implying a hang.
+            self._spinner.set_label(f"Reading the prompt {text}%")
+            return
+
+        if not self._generating:
+            # The first token of any kind means prompt evaluation finished.
+            self._spinner.set_label("Thinking")
+            self._generating = True
+
+        show_reasoning = get_settings().provider.show_thinking
+        if kind == "reasoning" and not show_reasoning:
+            return
+
+        if not self.printed:
+            self._spinner.stop()
+            self.printed = True
+
+        if kind != self._section:
+            # Reasoning is labelled so a long trace is not mistaken for the
+            # answer; the answer needs no label, only separation from it.
+            if kind == "reasoning":
+                sys.stdout.write("\n--- reasoning ---\n")
+            elif self._section == "reasoning":
+                sys.stdout.write("\n--- end reasoning ---\n\n")
+            else:
+                sys.stdout.write("\n")
+            self._section = kind
+
+        sys.stdout.write(text)
+        sys.stdout.flush()
+
+    def finish(self) -> None:
+        """Close the last section. Safe when nothing was ever printed."""
+        if not self.printed:
+            return
+        if self._section == "reasoning":
+            sys.stdout.write("\n--- end reasoning ---\n")
+        sys.stdout.write("\n")
+        sys.stdout.flush()
+
+
+def _print_reasoning() -> None:
+    """Print the reasoning captured this turn, if `/think show` is on.
+
+    A turn can make several model calls (planning, answering, tools), so the
+    traces are numbered when there is more than one — otherwise a long trace
+    reads as if the model contradicted itself mid-thought.
+    """
+    traces = reasoning_trace.drain()
+    if not traces:
+        return
+
+    print("\n--- reasoning ---")
+    for index, trace in enumerate(traces, start=1):
+        if len(traces) > 1:
+            print(f"\n[{index}/{len(traces)}]")
+        print(trace)
+    print("--- end reasoning ---")
 
 
 def _print_help() -> None:
@@ -140,12 +290,17 @@ def _handle_command(user_input: str) -> str:
                 print("\nError: Context size must be a valid integer.\n")
             return "consumed"
 
-    # /think [on|off] — toggle whether thinking models emit reasoning
+    # /think [on|off|show|hide] — control thinking-model reasoning
     if command == "/think":
         provider_settings = get_settings().provider
         if len(parts) == 1:
             state = "on" if provider_settings.thinking_enabled else "off"
-            print(f"\nThinking mode is {state}. Use '/think on' or '/think off'.\n")
+            visible = "shown" if provider_settings.show_thinking else "hidden"
+            print(
+                f"\nThinking mode is {state}; reasoning is {visible}.\n"
+                "Use '/think on|off' to toggle it, '/think show|hide' to "
+                "control whether you see it.\n"
+            )
             return "consumed"
         arg = parts[1].lower()
         if arg == "on":
@@ -156,8 +311,21 @@ def _handle_command(user_input: str) -> str:
             provider_settings.thinking_enabled = False
             _persist_pref("thinking_enabled", False)
             print("\nThinking mode: off (faster; model answers directly).\n")
+        elif arg == "show":
+            # Showing reasoning is meaningless if the model was told not to
+            # produce any, so turn thinking back on with it.
+            if not provider_settings.thinking_enabled:
+                provider_settings.thinking_enabled = True
+                _persist_pref("thinking_enabled", True)
+            provider_settings.show_thinking = True
+            _persist_pref("show_thinking", True)
+            print("\nThinking mode: on, reasoning shown above each answer.\n")
+        elif arg == "hide":
+            provider_settings.show_thinking = False
+            _persist_pref("show_thinking", False)
+            print("\nReasoning hidden. The model still thinks; you see the answer.\n")
         else:
-            print("\nUsage: /think on | /think off\n")
+            print("\nUsage: /think on | off | show | hide\n")
         return "consumed"
 
     # /learn [on|off] (aka /learning) — toggle the post-answer learning phase
@@ -521,12 +689,26 @@ def main() -> None:
         thinking = _ActivityIndicator("Thinking")
         learning = _ActivityIndicator("Learning")
 
+        live = _LiveOutput(thinking)
+        phases = _PhaseLabels(thinking)
+
         def on_answer(answer: str) -> None:
             thinking.stop()
-            print(f"\n{answer}\n")
+            if live.printed:
+                # Already on screen a token at a time; reprinting it whole
+                # would show the same answer twice.
+                live.finish()
+            else:
+                _print_reasoning()
+                print(f"\n{answer}\n")
             if get_settings().learning.enabled:
                 learning.start()
 
+        # Drop anything the previous turn's learning phase left buffered, so
+        # this turn only ever shows its own reasoning.
+        reasoning_trace.clear()
+        streaming.set_sink(live)
+        phases.subscribe()
         thinking.start()
         try:
             asyncio.run(brain.process(stripped, on_answer=on_answer))
@@ -536,6 +718,11 @@ def main() -> None:
             # the traceback.
             thinking.stop()
             learning.stop()
+            # The sink and the stage subscriptions are per-turn: book, tarot
+            # and serve modes run their own loops and must not print into this
+            # one's layout, nor relabel a spinner that is no longer running.
+            streaming.clear_sink()
+            phases.unsubscribe()
 
 
 if __name__ == "__main__":

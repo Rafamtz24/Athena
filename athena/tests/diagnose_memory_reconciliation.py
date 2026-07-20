@@ -1,12 +1,18 @@
 """
-Memory Reconciliation Verification Test
+Memory Reconciliation Diagnostic
 
-Tests that the MemoryReconciler correctly handles:
+Checks that the MemoryReconciler correctly handles:
 1. Conflicting facts: newer replaces older (name change)
 2. Conflicting facts: newer replaces older (color change)
 3. Conflicting facts: newer replaces older (city change)
 
-Verification is performed by reading data/semantic_memory.json from disk.
+Run manually:  python athena/tests/diagnose_memory_reconciliation.py
+
+DESTRUCTIVE — this is not part of the test suite, and pytest collects nothing
+from it. It loads a real model and CLEARS data/semantic_memory.json to set up
+each scenario, so running it discards whatever Athena has learned. Named
+diagnose_* rather than test_* for that reason: nothing here should run
+unattended alongside the suite.
 """
 
 import json
@@ -172,9 +178,9 @@ def main():
 
     # ── Test 3: City change ──
     run_test_scenario(
-        test_name="City change: Lisbon -> Guadalajara",
+        test_name="City change: Lisbon -> Porto",
         initial_facts=["User lives in Lisbon"],
-        candidate_statement="User lives in Guadalajara",
+        candidate_statement="User lives in Porto",
         expected_conflict_count=1,
     )
 

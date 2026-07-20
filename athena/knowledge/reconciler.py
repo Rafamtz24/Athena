@@ -3,15 +3,20 @@ Athena Memory Reconciler
 
 Reconciles validated knowledge candidates against existing Semantic Memory.
 
-For each validated candidate, the reconciler:
-1. Builds ONE prompt containing the candidate + ALL existing SM entries
-   (via the dedicated prompt builder: build_reconciliation_prompt)
-2. Calls the reasoning model ONCE per candidate
-3. Parses the structured response (action + conflicting content)
-4. Applies deterministic memory modifications
+Reconciliation runs in two passes:
 
-Provider call count: EXACTLY ONE per validated candidate.
-The number of existing SM entries is irrelevant (all batched in one prompt).
+1. Deterministic. Candidates naming a single-valued attribute (name,
+   location, operating system...) are resolved by comparing parsed values —
+   no model, and therefore reliable regardless of which model is loaded.
+2. Batched. Everything left goes to the model in ONE call, together with all
+   existing SM entries. Each verdict is parsed and applied.
+
+Provider call count: ONE per turn, not one per candidate — plus one retry for
+any candidate the batched response failed to classify.
+
+Edge case, single candidate: sent through the single-pair prompt instead. Its
+output shape is simpler for a small learning model, and there is nothing to
+batch.
 
 Fail-safe: if reconciliation fails (LLM error, parse error), Semantic Memory
 is NOT modified. The failure is logged and the candidate is discarded.
@@ -56,6 +61,94 @@ _RECONCILIATION_PROMPT_PREFIX = (
 _RECONCILIATION_PROMPT_SUFFIX = (
     "\n\n" + _RECONCILIATION_PROFILE.response_format
 )
+
+_BATCH_PROMPT_PREFIX = (
+    _RECONCILIATION_PROFILE.system_prompt
+    + "\n\n"
+    + _RECONCILIATION_PROFILE.rules
+    + "\n\n=== NOW CLASSIFY EVERY NEW FACT BELOW ===\n\n"
+)
+
+_BATCH_PROMPT_SUFFIX = (
+    "\n\n" + _RECONCILIATION_PROFILE.get(
+        "batch_response_format", _RECONCILIATION_PROFILE.response_format
+    )
+)
+
+
+def build_batch_reconciliation_prompt(
+    candidate_statements: List[str],
+    existing_contents: List[str],
+) -> str:
+    """Build one prompt classifying several candidates against memory.
+
+    A turn usually yields more than one candidate, and reconciling them one
+    call at a time made the learning phase scale with candidate count for no
+    benefit — every call re-sends the same memory. Batching also lets the
+    model see the candidates together, so two facts that duplicate *each
+    other* are visible rather than being judged in isolation.
+
+    Args:
+        candidate_statements: The new facts, in order. Their 1-based position
+            is the FACT number the model must echo back.
+        existing_contents: Every existing Semantic Memory entry.
+
+    Returns:
+        A prompt string ready to send to the LLM.
+    """
+    lines = ["EXISTING MEMORY:"]
+    if existing_contents:
+        for index, content in enumerate(existing_contents, 1):
+            lines.append(f'  {index}. "{content}"')
+    else:
+        lines.append("  (none)")
+
+    lines.append("")
+    lines.append("NEW FACTS TO CLASSIFY:")
+    for index, statement in enumerate(candidate_statements, 1):
+        lines.append(f'  FACT {index}: "{statement}"')
+
+    return _BATCH_PROMPT_PREFIX + "\n".join(lines) + _BATCH_PROMPT_SUFFIX
+
+
+def parse_batch_reconciliation_response(
+    response: str,
+    expected: int,
+) -> dict:
+    """Split a batched response into per-candidate verdicts.
+
+    Returns:
+        {candidate_index (0-based): (action, matched_contents)} for every
+        block that parsed. Indices missing from the result are the caller's
+        signal to reconcile those candidates individually — a model that
+        drops or garbles one block should cost one extra call, not the whole
+        batch.
+    """
+    text = str(response)
+    verdicts: dict = {}
+
+    # Locate each "FACT: n" header, then hand the text up to the next header
+    # to the same parser the single-pair path uses.
+    headers = list(re.finditer(r'FACT\s*:?\s*(\d+)', text, re.IGNORECASE))
+    for position, header in enumerate(headers):
+        try:
+            number = int(header.group(1))
+        except ValueError:
+            continue
+        if not 1 <= number <= expected:
+            continue
+
+        end = headers[position + 1].start() if position + 1 < len(headers) else len(text)
+        block = text[header.end():end]
+
+        action, contents = parse_reconciliation_response(block)
+        # A block with no ACTION line parses as DIFFERENT, which would insert
+        # the fact on no evidence. Treat it as missing so it is retried alone.
+        if not re.search(r'ACTION\s*:', block, re.IGNORECASE):
+            continue
+        verdicts[number - 1] = (action, contents)
+
+    return verdicts
 
 
 def build_reconciliation_prompt(
@@ -214,11 +307,11 @@ class MemoryReconciler:
     """
     Reconciles knowledge candidates against existing Semantic Memory.
 
-    Uses the reasoning model (via build_reconciliation_prompt) to determine
-    if each candidate is a duplicate, conflict, or new knowledge relative to ALL
-    existing Semantic Memory entries.
+    Determines whether each candidate is a duplicate, a conflict, or new
+    knowledge, relative to ALL existing Semantic Memory entries.
 
-    Provider call count: EXACTLY ONE per validated candidate.
+    Provider call count: ONE per turn (see module docstring), after the
+    deterministic pass has removed everything a model is not needed for.
     """
 
     def __init__(self, llm_provider) -> None:
@@ -256,13 +349,144 @@ class MemoryReconciler:
             'errors': 0,
         }
 
+        # Pass 1 — deterministic. Single-valued attributes (name, location,
+        # ...) resolve without a model at all, so they never reach the batch.
+        deferred: List[KnowledgeCandidate] = []
         for candidate in candidates:
-            outcome = self._reconcile_one(candidate, semantic_memory)
+            existing_entries = semantic_memory.query()
+            if not existing_entries:
+                self._learn_candidate(candidate, semantic_memory)
+                results['processed'] += 1
+                results['new_facts'] += 1
+                continue
+
+            outcome = self._reconcile_by_attribute(
+                candidate, semantic_memory, existing_entries
+            )
+            if outcome is None:
+                deferred.append(candidate)
+            else:
+                results['processed'] += 1
+                results[outcome] += 1
+
+        # Pass 2 — one model call for everything left.
+        for outcome in self._reconcile_deferred(deferred, semantic_memory):
             results['processed'] += 1
             if outcome in results:
                 results[outcome] += 1
 
         return results
+
+    def _reconcile_deferred(
+        self,
+        candidates: List[KnowledgeCandidate],
+        semantic_memory: SemanticMemory,
+    ) -> List[str]:
+        """Reconcile the candidates the deterministic pass could not judge.
+
+        One provider call for the whole group. A single candidate is sent
+        through the single-pair prompt instead — it is the simpler output for
+        a small learning model to produce, and there is nothing to batch.
+
+        Returns:
+            One outcome string per candidate, in order.
+        """
+        if not candidates:
+            return []
+        if len(candidates) == 1:
+            return [self._reconcile_one(candidates[0], semantic_memory)]
+
+        existing_entries = semantic_memory.query()
+        existing_contents = [str(getattr(e, 'content', e)) for e in existing_entries]
+        prompt = build_batch_reconciliation_prompt(
+            [c.statement for c in candidates], existing_contents
+        )
+
+        try:
+            response = self.llm_provider.generate(prompt)
+        except Exception as exc:
+            logger.error(f"[RECONCILER] Batch provider call failed: {exc}")
+            return ['errors'] * len(candidates)
+
+        try:
+            verdicts = parse_batch_reconciliation_response(response, len(candidates))
+        except Exception as exc:
+            logger.error(f"[RECONCILER] Batch parse failed: {exc}")
+            logger.error(f"[RECONCILER] Raw response: {str(response)[:300]}")
+            verdicts = {}
+
+        outcomes: List[str] = []
+        for index, candidate in enumerate(candidates):
+            if index not in verdicts:
+                # The model dropped or garbled this block. Retrying it alone
+                # costs one call; guessing would cost a wrong memory.
+                logger.warning(
+                    f"[RECONCILER] No verdict for candidate {index + 1}; "
+                    f"reconciling it individually."
+                )
+                outcomes.append(self._reconcile_one(candidate, semantic_memory))
+                continue
+
+            action, matched_contents = verdicts[index]
+            outcomes.append(
+                self._apply_verdict(
+                    candidate, action, matched_contents, semantic_memory
+                )
+            )
+
+        return outcomes
+
+    def _apply_verdict(
+        self,
+        candidate: KnowledgeCandidate,
+        action: str,
+        matched_contents: List[str],
+        semantic_memory: SemanticMemory,
+    ) -> str:
+        """Apply one classified verdict to Semantic Memory.
+
+        Memory is re-read here rather than reusing the snapshot the batch was
+        classified against: earlier candidates in the same batch may already
+        have inserted or removed entries, and a conflict must be resolved
+        against what is actually stored now.
+        """
+        if action == 'DUPLICATE':
+            return 'duplicates'
+
+        if action == 'CONFLICT':
+            existing_entries = semantic_memory.query()
+            for conflict_content in matched_contents:
+                entry = find_entry_by_content(conflict_content, existing_entries)
+                if entry is not None:
+                    entry_id = getattr(entry, 'id', None)
+                    if entry_id:
+                        semantic_memory.remove(entry_id)
+            self._learn_candidate(candidate, semantic_memory)
+            return 'conflicts'
+
+        if action == 'DIFFERENT':
+            # Two candidates in one batch can duplicate each other; each was
+            # judged against memory as it stood before either was stored.
+            if self._already_stored(candidate.statement, semantic_memory):
+                return 'duplicates'
+            self._learn_candidate(candidate, semantic_memory)
+            return 'new_facts'
+
+        logger.error(
+            f"[RECONCILER] Unknown action '{action}' for candidate "
+            f'"{candidate.statement[:60]}"'
+        )
+        return 'errors'
+
+    @staticmethod
+    def _already_stored(statement: str, semantic_memory: SemanticMemory) -> bool:
+        """Whether this exact statement (ignoring case/spacing) is in memory."""
+        target = ' '.join(statement.lower().split()).rstrip('.')
+        for entry in semantic_memory.query():
+            content = str(getattr(entry, 'content', entry))
+            if ' '.join(content.lower().split()).rstrip('.') == target:
+                return True
+        return False
 
     # ── Internal: reconcile a single candidate ─────────────────
 
